@@ -1,4 +1,17 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PlanCraft
+
+AI 프롬프트를 레이어 기반 화면 설계서와 퍼블리싱 코드로 변환하는 Next.js MVP입니다.
+
+## 시작하기
+
+```bash
+pnpm install
+pnpm dev
+```
+
+Firebase 저장을 사용하려면 `.env.example`을 `.env.local`로 복사하고 Firebase Admin 서비스 계정 값을 입력합니다. 값이 없으면 UI는 데모 모드로 동작합니다. 서비스 계정 키는 서버에서만 사용되며 브라우저로 전달되지 않습니다.
+
+현재 MVP에는 레이어 탐색, 요소 선택, 속성 패널, 데스크톱/태블릿/모바일 캔버스, AI 생성 흐름, HTML 코드 보기/복사, Firestore 초안 저장 API가 포함되어 있습니다.
 
 ## Getting Started
 
