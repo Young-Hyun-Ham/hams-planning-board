@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./icon";
 import type {
   Device,
@@ -101,6 +102,8 @@ export function CanvasEditor({
   onMove,
   onReorder,
   onDelete,
+  projectId,
+  focusRequestKey,
   selected,
   content,
   onSelect,
@@ -118,6 +121,8 @@ export function CanvasEditor({
     action: "front" | "forward" | "backward" | "back",
   ) => void;
   onDelete: (id: string) => void;
+  projectId?: string;
+  focusRequestKey: number;
   selected: string;
   content: EditableContent;
   onSelect: (id: string) => void;
@@ -134,17 +139,52 @@ export function CanvasEditor({
     width: number;
     height: number;
   } | null>(null);
-  const [orderMenu, setOrderMenu] = useState<{ x: number; y: number } | null>(
-    null,
-  );
+  const [orderMenu, setOrderMenu] = useState<{
+    x: number;
+    y: number;
+    submenuSide: "left" | "right";
+  } | null>(null);
   const [zoom, setZoom] = useState<number>(100),
     [zoomMenu, setZoomMenu] = useState(false);
+  const [commentPanel, setCommentPanel] = useState<"write" | "list" | null>(
+    null,
+  );
+  const [commentText, setCommentText] = useState(""),
+    [commentSaving, setCommentSaving] = useState(false),
+    [commentLoading, setCommentLoading] = useState(false),
+    [commentError, setCommentError] = useState("");
+  const [comments, setComments] = useState<
+    { id: string; text: string; author: string; createdAt: string | null }[]
+  >([]);
   const artboardRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const suppressCanvasClickRef = useRef(false);
+  useEffect(() => {
+    if (!commentPanel) return;
+    const close = (event: PointerEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".comment-control")
+      )
+        return;
+      setCommentPanel(null);
+    };
+    window.addEventListener("pointerdown", close, true);
+    return () => window.removeEventListener("pointerdown", close, true);
+  }, [commentPanel]);
   const select = (event: React.MouseEvent, id: string) => {
     event.stopPropagation();
     if (tool === "cursor" && !editing) onSelect(id);
+  };
+  const openOrderMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setOrderMenu({
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 194)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 154)),
+      submenuSide:
+        event.clientX + 178 + 230 + 16 > window.innerWidth ? "left" : "right",
+    });
   };
   const orderMap = new Map(
     flatten(layers).map((item, index) => [item.id, index + 1]),
@@ -160,27 +200,33 @@ export function CanvasEditor({
     zIndex: orderMap.get(id),
   });
   const selectedLayer = flatten(layers).find((item) => item.id === selected);
-  const findParentPage = (
-    items: Layer[],
-    id: string,
-    page?: Layer,
-  ): Layer | undefined => {
-    for (const item of items) {
-      const currentPage = item.kind === "page" ? item : page;
-      if (item.id === id) return currentPage;
-      const found =
-        item.children && findParentPage(item.children, id, currentPage);
-      if (found) return found;
-    }
-  };
-  const selectedPage = findParentPage(layers, selected);
-  const activePage =
-    selectedPage?.visible !== false
-      ? selectedPage
-      : layers.find((item) => item.kind === "page" && item.visible !== false);
-  const artboardSelected =
-    selectedLayer?.kind === "page" && selectedLayer.id === activePage?.id;
-  const pageSelected = artboardSelected;
+  const pages = layers.filter(
+    (item) => item.kind === "page" && item.visible !== false,
+  );
+  const defaultPageWidth =
+    device === "desktop" ? 860 : device === "tablet" ? 650 : 390;
+  const pagePosition = (page: Layer, index: number): LayerPosition =>
+    positions[page.id] ?? { x: index * (defaultPageWidth + 80), y: 0 };
+  const workspaceWidth = Math.max(
+    2400,
+    ...pages.map((page, index) =>
+      Math.max(
+        0,
+        pagePosition(page, index).x +
+          (sizes[page.id]?.width ?? defaultPageWidth) +
+          400,
+      ),
+    ),
+  );
+  const workspaceHeight = Math.max(
+    1600,
+    ...pages.map((page, index) =>
+      Math.max(
+        0,
+        pagePosition(page, index).y + (sizes[page.id]?.height ?? 560) + 400,
+      ),
+    ),
+  );
   const activeIds = new Set(flatten(layers).map((item) => item.id));
   const editableSelection: Record<string, string> = {
     logo: "logo",
@@ -375,11 +421,45 @@ export function CanvasEditor({
     });
   }, [selected, sizes, positions, device, content, layers, zoom]);
 
+  useEffect(() => {
+    if (focusRequestKey === 0) return;
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      setPanOffset({ x: 0, y: 0 });
+      secondFrame = requestAnimationFrame(() => {
+        const canvas = canvasRef.current;
+        const node = artboardRef.current?.querySelector<HTMLElement>(
+          `[data-layer-id="${CSS.escape(selected)}"]`,
+        );
+        if (!canvas || !node) return;
+        const canvasRect = canvas.getBoundingClientRect();
+        const nodeRect = node.getBoundingClientRect();
+        canvas.scrollTo({
+          left:
+            canvas.scrollLeft +
+            nodeRect.left -
+            canvasRect.left -
+            (canvas.clientWidth - nodeRect.width) / 2,
+          top:
+            canvas.scrollTop +
+            nodeRect.top -
+            canvasRect.top -
+            (canvas.clientHeight - nodeRect.height) / 2,
+          behavior: "smooth",
+        });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [focusRequestKey, selected]);
+
   const beginResize = (
     event: React.PointerEvent,
     corner: "nw" | "ne" | "sw" | "se",
   ) => {
-    if (!box || selectedLayer?.locked) return;
+    if (event.button !== 0 || !box || selectedLayer?.locked) return;
     event.preventDefault();
     event.stopPropagation();
     const scale =
@@ -412,17 +492,22 @@ export function CanvasEditor({
         dy = (lastEvent.clientY - start.y) / scale,
         west = corner.includes("w"),
         north = corner.includes("n");
+      const unbounded = selectedLayer?.kind === "page";
       const maxWidth = Math.max(
           1,
-          west
-            ? start.position.x + start.width
-            : parent.clientWidth - start.position.x,
+          unbounded
+            ? Number.POSITIVE_INFINITY
+            : west
+              ? start.position.x + start.width
+              : parent.clientWidth - start.position.x,
         ),
         maxHeight = Math.max(
           1,
-          north
-            ? start.position.y + start.height
-            : parent.clientHeight - start.position.y,
+          unbounded
+            ? Number.POSITIVE_INFINITY
+            : north
+              ? start.position.y + start.height
+              : parent.clientHeight - start.position.y,
         ),
         minWidth = Math.min(24, maxWidth),
         minHeight = Math.min(18, maxHeight);
@@ -461,6 +546,7 @@ export function CanvasEditor({
 
   const beginMove = (event: React.PointerEvent) => {
     if (
+      event.button !== 0 ||
       !box ||
       selectedLayer?.locked ||
       (event.target as HTMLElement).classList.contains("resize-handle")
@@ -485,8 +571,14 @@ export function CanvasEditor({
           y: node.offsetTop,
         },
       },
-      maxX = Math.max(0, parent.clientWidth - node.offsetWidth),
-      maxY = Math.max(0, parent.clientHeight - node.offsetHeight);
+      maxX =
+        selectedLayer?.kind === "page"
+          ? Number.POSITIVE_INFINITY
+          : Math.max(0, parent.clientWidth - node.offsetWidth),
+      maxY =
+        selectedLayer?.kind === "page"
+          ? Number.POSITIVE_INFINITY
+          : Math.max(0, parent.clientHeight - node.offsetHeight);
     let frame: number | null = null,
       lastEvent: PointerEvent | null = null;
     const update = () => {
@@ -555,6 +647,71 @@ export function CanvasEditor({
     window.addEventListener("pointerup", end);
   };
 
+  const loadComments = async () => {
+    if (!projectId) {
+      setCommentError("먼저 문서를 저장해주세요.");
+      return;
+    }
+    setCommentLoading(true);
+    setCommentError("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/comments`,
+      );
+      const result = (await response.json()) as {
+        comments?: typeof comments;
+        error?: string;
+      };
+      if (!response.ok)
+        throw new Error(result.error ?? "코멘트를 불러오지 못했습니다.");
+      setComments(result.comments ?? []);
+    } catch (error) {
+      setCommentError(
+        error instanceof Error
+          ? error.message
+          : "코멘트를 불러오지 못했습니다.",
+      );
+    } finally {
+      setCommentLoading(false);
+    }
+  };
+  const saveComment = async () => {
+    if (!projectId) {
+      setCommentError("먼저 문서를 저장해주세요.");
+      return;
+    }
+    if (!commentText.trim()) return;
+    setCommentSaving(true);
+    setCommentError("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/comments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: commentText }),
+        },
+      );
+      const result = (await response.json()) as {
+        saved?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !result.saved)
+        throw new Error(result.error ?? "코멘트를 저장하지 못했습니다.");
+      setCommentText("");
+      setCommentPanel("list");
+      await loadComments();
+    } catch (error) {
+      setCommentError(
+        error instanceof Error
+          ? error.message
+          : "코멘트를 저장하지 못했습니다.",
+      );
+    } finally {
+      setCommentSaving(false);
+    }
+  };
+
   return (
     <section className="canvas-area">
       <div className="canvas-toolbar">
@@ -574,9 +731,86 @@ export function CanvasEditor({
             <Icon name="hand" />
           </button>
           <span />
-          <button>
-            <Icon name="comment" />
-          </button>
+          <div className="comment-control">
+            <button
+              className={commentPanel === "write" ? "active" : ""}
+              onClick={() => {
+                setCommentError("");
+                setCommentPanel((current) =>
+                  current === "write" ? null : "write",
+                );
+              }}
+              title="코멘트 작성"
+            >
+              <Icon name="comment" />
+            </button>
+            {commentPanel === "write" && (
+              <div className="comment-popover">
+                <strong>코멘트 남기기</strong>
+                <textarea
+                  maxLength={1000}
+                  value={commentText}
+                  onChange={(event) => setCommentText(event.target.value)}
+                  placeholder="공유할 코멘트를 입력하세요."
+                  autoFocus
+                />
+                <div className="comment-popover-footer">
+                  <span>{commentText.length}/1000</span>
+                  <button
+                    onClick={saveComment}
+                    disabled={commentSaving || !commentText.trim()}
+                  >
+                    {commentSaving ? "저장 중..." : "저장"}
+                  </button>
+                </div>
+                {commentError && <p>{commentError}</p>}
+              </div>
+            )}
+          </div>
+          <div className="comment-control">
+            <button
+              className={commentPanel === "list" ? "active" : ""}
+              onClick={() => {
+                const opening = commentPanel !== "list";
+                setCommentPanel(opening ? "list" : null);
+                if (opening) void loadComments();
+              }}
+              title="코멘트 목록"
+            >
+              <Icon name="comment" />
+              <span className="comment-list-mark">≡</span>
+            </button>
+            {commentPanel === "list" && (
+              <div className="comment-popover comment-list-popover">
+                <strong>코멘트 목록</strong>
+                {commentLoading ? (
+                  <div className="comment-state">불러오는 중...</div>
+                ) : commentError ? (
+                  <div className="comment-state error">{commentError}</div>
+                ) : comments.length === 0 ? (
+                  <div className="comment-state">등록된 코멘트가 없습니다.</div>
+                ) : (
+                  <div className="comment-items">
+                    {comments.map((comment) => (
+                      <article key={comment.id}>
+                        <div>
+                          <b>{comment.author}</b>
+                          <time>
+                            {comment.createdAt
+                              ? new Date(comment.createdAt).toLocaleString(
+                                  "ko-KR",
+                                )
+                              : "방금 전"}
+                          </time>
+                        </div>
+                        <p>{comment.text}</p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="device-switch">
           {(["desktop", "tablet", "mobile"] as const).map((item) => (
@@ -631,221 +865,229 @@ export function CanvasEditor({
         <div
           className="artboard-zoom-stage"
           style={{
-            width:
-              ((device === "desktop" ? 860 : device === "tablet" ? 650 : 390) *
-                zoom) /
-              100,
-            height: (560 * zoom) / 100,
+            width: (workspaceWidth * zoom) / 100,
+            height: (workspaceHeight * zoom) / 100,
             transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
           }}
         >
           <div
             ref={artboardRef}
-            style={{ transform: `scale(${zoom / 100})` }}
-            className={`artboard ${device} ${artboardSelected ? "canvas-node-selected" : ""} ${pageSelected ? "page-selected" : ""}`}
-            data-layer-id={activePage?.id}
-            data-layer-label={artboardSelected ? activePage?.name : undefined}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              setOrderMenu({
-                x: Math.min(event.clientX, window.innerWidth - 190),
-                y: Math.min(event.clientY, window.innerHeight - 190),
-              });
-            }}
-            onClick={(event) => {
-              if (
-                event.target === event.currentTarget &&
-                !suppressCanvasClickRef.current &&
-                activePage
-              )
-                select(event, activePage.id);
+            className="canvas-workspace"
+            style={{
+              width: workspaceWidth,
+              height: workspaceHeight,
+              transform: `scale(${zoom / 100})`,
             }}
           >
-            {activeIds.has("nav") && (
-              <nav
-                style={styleFor("nav")}
-                data-layer-id="nav"
-                className={`portfolio-nav ${selected === "nav" ? "canvas-node-selected" : ""}`}
-                data-layer-label="Navigation"
-                onClick={(event) => select(event, "nav")}
+            {pages.map((page, pageIndex) => (
+              <div
+                key={page.id}
+                style={{
+                  left: pagePosition(page, pageIndex).x,
+                  top: pagePosition(page, pageIndex).y,
+                  width: sizes[page.id]?.width,
+                  height: sizes[page.id]?.height,
+                }}
+                className={`artboard ${device} ${selected === page.id ? "canvas-node-selected page-selected" : ""}`}
+                data-layer-id={page.id}
+                data-layer-label={selected === page.id ? page.name : undefined}
+                onContextMenu={openOrderMenu}
+                onClick={(event) => {
+                  if (!suppressCanvasClickRef.current && page)
+                    select(event, page.id);
+                }}
               >
-                {activeIds.has("logo") && (
-                  <EditableText
-                    id="logo"
-                    field="logo"
-                    value={content.logo}
-                    selected={selected === "logo"}
-                    editing={editing === "logo"}
-                    onSelect={select}
-                    onEdit={setEditing}
-                    onUpdate={onUpdate}
-                    as="b"
-                    style={styleFor("logo")}
-                  />
-                )}
-                {activeIds.has("menu") && (
-                  <div
-                    style={styleFor("menu")}
-                    data-layer-id="menu"
-                    className={
-                      selected === "menu" ? "canvas-node-selected" : ""
-                    }
-                    data-layer-label="Menu Items"
-                    onClick={(event) => select(event, "menu")}
+                {activeIds.has("nav") && (
+                  <nav
+                    style={styleFor("nav")}
+                    data-layer-id="nav"
+                    className={`portfolio-nav ${selected === "nav" ? "canvas-node-selected" : ""}`}
+                    data-layer-label="Navigation"
+                    onClick={(event) => select(event, "nav")}
                   >
-                    <EditableText
-                      id="menuAbout"
-                      selectId="menu"
-                      field="menuAbout"
-                      value={content.menuAbout}
-                      selected={false}
-                      editing={editing === "menuAbout"}
-                      onSelect={select}
-                      onEdit={setEditing}
-                      onUpdate={onUpdate}
-                    />
-                    <EditableText
-                      id="menuProjects"
-                      selectId="menu"
-                      field="menuProjects"
-                      value={content.menuProjects}
-                      selected={false}
-                      editing={editing === "menuProjects"}
-                      onSelect={select}
-                      onEdit={setEditing}
-                      onUpdate={onUpdate}
-                    />
-                    <EditableText
-                      id="menuContact"
-                      selectId="menu"
-                      field="menuContact"
-                      value={content.menuContact}
-                      selected={false}
-                      editing={editing === "menuContact"}
-                      onSelect={select}
-                      onEdit={setEditing}
-                      onUpdate={onUpdate}
-                    />
-                    {renderCustomChildren("menu")}
-                  </div>
-                )}
-                {renderCustomChildren("nav")}
-              </nav>
-            )}
-            <div className="hero-grid">
-              {activeIds.has("intro") && (
-                <div
-                  style={styleFor("intro")}
-                  data-layer-id="intro"
-                  className={`hero-copy ${selected === "intro" ? "canvas-node-selected" : ""}`}
-                  data-layer-label="Intro Content"
-                  onClick={(event) => select(event, "intro")}
-                >
-                  {activeIds.has("eyebrow") && (
-                    <EditableText
-                      id="eyebrow"
-                      field="eyebrow"
-                      value={content.eyebrow}
-                      selected={selected === "eyebrow"}
-                      editing={editing === "eyebrow"}
-                      className="role"
-                      onSelect={select}
-                      onEdit={setEditing}
-                      onUpdate={onUpdate}
-                      style={styleFor("eyebrow")}
-                    />
-                  )}{" "}
-                  {activeIds.has("heading") && (
-                    <EditableText
-                      id="heading"
-                      field="heading"
-                      value={content.heading}
-                      selected={selected === "heading"}
-                      editing={editing === "heading"}
-                      onSelect={select}
-                      onEdit={setEditing}
-                      onUpdate={onUpdate}
-                      multiline
-                      as="h1"
-                      style={styleFor("heading")}
-                    />
-                  )}{" "}
-                  {activeIds.has("description") && (
-                    <EditableText
-                      id="description"
-                      field="description"
-                      value={content.description}
-                      selected={selected === "description"}
-                      editing={editing === "description"}
-                      onSelect={select}
-                      onEdit={setEditing}
-                      onUpdate={onUpdate}
-                      multiline
-                      as="p"
-                      style={styleFor("description")}
-                    />
-                  )}{" "}
-                  {activeIds.has("cta") && (
-                    <button
-                      style={styleFor("cta")}
-                      data-layer-id="cta"
-                      className={
-                        selected === "cta" ? "canvas-node-selected" : ""
-                      }
-                      data-layer-label="CTA Button"
-                      onClick={(event) => select(event, "cta")}
-                    >
+                    {activeIds.has("logo") && (
                       <EditableText
-                        id="cta-text"
-                        selectId="cta"
-                        field="cta"
-                        value={content.cta}
-                        selected={false}
-                        editing={editing === "cta-text"}
+                        id="logo"
+                        field="logo"
+                        value={content.logo}
+                        selected={selected === "logo"}
+                        editing={editing === "logo"}
                         onSelect={select}
                         onEdit={setEditing}
                         onUpdate={onUpdate}
-                      />{" "}
-                      <span>→</span>
-                    </button>
-                  )}
-                </div>
-              )}{" "}
-              {activeIds.has("portrait") && (
-                <div
-                  style={{
-                    ...styleFor("portrait"),
-                    ...(layerImages.portrait
-                      ? {
-                          backgroundImage: `url(${layerImages.portrait})`,
-                          backgroundSize: "cover",
-                          backgroundPosition: "center",
+                        as="b"
+                        style={styleFor("logo")}
+                      />
+                    )}
+                    {activeIds.has("menu") && (
+                      <div
+                        style={styleFor("menu")}
+                        data-layer-id="menu"
+                        className={
+                          selected === "menu" ? "canvas-node-selected" : ""
                         }
-                      : {}),
-                  }}
-                  data-layer-id="portrait"
-                  className={`portrait ${selected === "portrait" ? "canvas-node-selected" : ""}`}
-                  data-layer-label="Profile Image"
-                  onClick={(event) => select(event, "portrait")}
-                >
-                  {!layerImages.portrait && (
-                    <div className="portrait-shape">
-                      <div className="person-head" />
-                      <div className="person-body" />
+                        data-layer-label="Menu Items"
+                        onClick={(event) => select(event, "menu")}
+                      >
+                        <EditableText
+                          id="menuAbout"
+                          selectId="menu"
+                          field="menuAbout"
+                          value={content.menuAbout}
+                          selected={false}
+                          editing={editing === "menuAbout"}
+                          onSelect={select}
+                          onEdit={setEditing}
+                          onUpdate={onUpdate}
+                        />
+                        <EditableText
+                          id="menuProjects"
+                          selectId="menu"
+                          field="menuProjects"
+                          value={content.menuProjects}
+                          selected={false}
+                          editing={editing === "menuProjects"}
+                          onSelect={select}
+                          onEdit={setEditing}
+                          onUpdate={onUpdate}
+                        />
+                        <EditableText
+                          id="menuContact"
+                          selectId="menu"
+                          field="menuContact"
+                          value={content.menuContact}
+                          selected={false}
+                          editing={editing === "menuContact"}
+                          onSelect={select}
+                          onEdit={setEditing}
+                          onUpdate={onUpdate}
+                        />
+                        {renderCustomChildren("menu")}
+                      </div>
+                    )}
+                    {renderCustomChildren("nav")}
+                  </nav>
+                )}
+                <div className="hero-grid">
+                  {activeIds.has("intro") && (
+                    <div
+                      style={styleFor("intro")}
+                      data-layer-id="intro"
+                      className={`hero-copy ${selected === "intro" ? "canvas-node-selected" : ""}`}
+                      data-layer-label="Intro Content"
+                      onClick={(event) => select(event, "intro")}
+                    >
+                      {activeIds.has("eyebrow") && (
+                        <EditableText
+                          id="eyebrow"
+                          field="eyebrow"
+                          value={content.eyebrow}
+                          selected={selected === "eyebrow"}
+                          editing={editing === "eyebrow"}
+                          className="role"
+                          onSelect={select}
+                          onEdit={setEditing}
+                          onUpdate={onUpdate}
+                          style={styleFor("eyebrow")}
+                        />
+                      )}{" "}
+                      {activeIds.has("heading") && (
+                        <EditableText
+                          id="heading"
+                          field="heading"
+                          value={content.heading}
+                          selected={selected === "heading"}
+                          editing={editing === "heading"}
+                          onSelect={select}
+                          onEdit={setEditing}
+                          onUpdate={onUpdate}
+                          multiline
+                          as="h1"
+                          style={styleFor("heading")}
+                        />
+                      )}{" "}
+                      {activeIds.has("description") && (
+                        <EditableText
+                          id="description"
+                          field="description"
+                          value={content.description}
+                          selected={selected === "description"}
+                          editing={editing === "description"}
+                          onSelect={select}
+                          onEdit={setEditing}
+                          onUpdate={onUpdate}
+                          multiline
+                          as="p"
+                          style={styleFor("description")}
+                        />
+                      )}{" "}
+                      {activeIds.has("cta") && (
+                        <button
+                          style={styleFor("cta")}
+                          data-layer-id="cta"
+                          className={
+                            selected === "cta" ? "canvas-node-selected" : ""
+                          }
+                          data-layer-label="CTA Button"
+                          onClick={(event) => select(event, "cta")}
+                        >
+                          <EditableText
+                            id="cta-text"
+                            selectId="cta"
+                            field="cta"
+                            value={content.cta}
+                            selected={false}
+                            editing={editing === "cta-text"}
+                            onSelect={select}
+                            onEdit={setEditing}
+                            onUpdate={onUpdate}
+                          />{" "}
+                          <span>→</span>
+                        </button>
+                      )}
+                    </div>
+                  )}{" "}
+                  {activeIds.has("portrait") && (
+                    <div
+                      style={{
+                        ...styleFor("portrait"),
+                        ...(layerImages.portrait
+                          ? {
+                              backgroundImage: `url(${layerImages.portrait})`,
+                              backgroundSize: "cover",
+                              backgroundPosition: "center",
+                            }
+                          : {}),
+                      }}
+                      data-layer-id="portrait"
+                      className={`portrait ${selected === "portrait" ? "canvas-node-selected" : ""}`}
+                      data-layer-label="Profile Image"
+                      onClick={(event) => select(event, "portrait")}
+                    >
+                      {!layerImages.portrait && (
+                        <div className="portrait-shape">
+                          <div className="person-head" />
+                          <div className="person-body" />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-            <div className="custom-layer-stack">
-              {activePage && renderCustomChildren(activePage.id)}
-            </div>
+                <div className="custom-layer-stack">
+                  {renderCustomChildren(page.id)}
+                </div>
+                <div className="scroll-hint">
+                  <span>테두리 드래그로 이동 · 꼭짓점 드래그로 크기 조절</span>
+                  <i />
+                </div>
+              </div>
+            ))}
             {box && (
               <div
                 className="resize-overlay"
                 style={box}
                 onPointerDown={beginMove}
+                onContextMenu={openOrderMenu}
                 onClick={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
@@ -854,103 +1096,96 @@ export function CanvasEditor({
                 }}
                 title="드래그하여 이동"
               >
-                <button
-                  className="resize-handle nw"
-                  onPointerDown={(event) => beginResize(event, "nw")}
-                  title="크기 조절"
-                />
-                <button
-                  className="resize-handle ne"
-                  onPointerDown={(event) => beginResize(event, "ne")}
-                  title="크기 조절"
-                />
-                <button
-                  className="resize-handle sw"
-                  onPointerDown={(event) => beginResize(event, "sw")}
-                  title="크기 조절"
-                />
-                <button
-                  className="resize-handle se"
-                  onPointerDown={(event) => beginResize(event, "se")}
-                  title="크기 조절"
-                />
+                {(["top", "right", "bottom", "left"] as const).map((edge) => (
+                  <span
+                    key={edge}
+                    className={`move-edge ${edge}`}
+                    onPointerDown={beginMove}
+                  />
+                ))}
+                {(["nw", "ne", "sw", "se"] as const).map((corner) => (
+                  <button
+                    key={corner}
+                    className={`resize-handle ${corner}`}
+                    onPointerDown={(event) => beginResize(event, corner)}
+                    title="크기 조절"
+                  />
+                ))}
                 <span className="size-badge">
                   {Math.round(box.width)} × {Math.round(box.height)}
                 </span>
               </div>
             )}
-            <div className="scroll-hint">
-              <span>테두리 드래그로 이동 · 꼭짓점 드래그로 크기 조절</span>
-              <i />
-            </div>
           </div>
         </div>
       </div>
-      {orderMenu && (
-        <div
-          className="canvas-context-menu"
-          style={{ left: orderMenu.x, top: orderMenu.y }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <div className="order-menu-group">
-            <button className="order-menu-trigger">
-              <span className="order-symbol">▣</span>
-              <span>순서</span>
-              <span className="submenu-arrow">▸</span>
-            </button>
-            <div className="order-submenu">
-              <button
-                onClick={() => {
-                  onReorder(selected, "front");
-                  setOrderMenu(null);
-                }}
-              >
-                <span>맨 앞으로 가져오기</span>
-                <kbd>Ctrl+Shift+↑</kbd>
-              </button>
-              <button
-                onClick={() => {
-                  onReorder(selected, "forward");
-                  setOrderMenu(null);
-                }}
-              >
-                <span>앞으로 가져오기</span>
-                <kbd>Ctrl+↑</kbd>
-              </button>
-              <button
-                onClick={() => {
-                  onReorder(selected, "backward");
-                  setOrderMenu(null);
-                }}
-              >
-                <span>뒤로 보내기</span>
-                <kbd>Ctrl+↓</kbd>
-              </button>
-              <button
-                onClick={() => {
-                  onReorder(selected, "back");
-                  setOrderMenu(null);
-                }}
-              >
-                <span>맨 뒤로 보내기</span>
-                <kbd>Ctrl+Shift+↓</kbd>
-              </button>
-            </div>
-          </div>
-          <div className="canvas-menu-separator" />
-          <button
-            className="canvas-delete-button"
-            disabled={selected === "page"}
-            onClick={() => {
-              onDelete(selected);
-              setOrderMenu(null);
-            }}
+      {orderMenu &&
+        createPortal(
+          <div
+            className={`canvas-context-menu submenu-${orderMenu.submenuSide}`}
+            style={{ left: orderMenu.x, top: orderMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}
           >
-            <span>×</span>
-            <span>삭제</span>
-          </button>
-        </div>
-      )}
+            <div className="order-menu-group">
+              <button className="order-menu-trigger">
+                <span className="order-symbol">▣</span>
+                <span>순서</span>
+                <span className="submenu-arrow">▸</span>
+              </button>
+              <div className="order-submenu">
+                <button
+                  onClick={() => {
+                    onReorder(selected, "front");
+                    setOrderMenu(null);
+                  }}
+                >
+                  <span>맨 앞으로 가져오기</span>
+                  <kbd>Ctrl+Shift+↑</kbd>
+                </button>
+                <button
+                  onClick={() => {
+                    onReorder(selected, "forward");
+                    setOrderMenu(null);
+                  }}
+                >
+                  <span>앞으로 가져오기</span>
+                  <kbd>Ctrl+↑</kbd>
+                </button>
+                <button
+                  onClick={() => {
+                    onReorder(selected, "backward");
+                    setOrderMenu(null);
+                  }}
+                >
+                  <span>뒤로 보내기</span>
+                  <kbd>Ctrl+↓</kbd>
+                </button>
+                <button
+                  onClick={() => {
+                    onReorder(selected, "back");
+                    setOrderMenu(null);
+                  }}
+                >
+                  <span>맨 뒤로 보내기</span>
+                  <kbd>Ctrl+Shift+↓</kbd>
+                </button>
+              </div>
+            </div>
+            <div className="canvas-menu-separator" />
+            <button
+              className="canvas-delete-button"
+              disabled={selected === "page"}
+              onClick={() => {
+                onDelete(selected);
+                setOrderMenu(null);
+              }}
+            >
+              <span>×</span>
+              <span>삭제</span>
+            </button>
+          </div>,
+          document.body,
+        )}
     </section>
   );
 }

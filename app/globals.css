@@ -1,5 +1,130 @@
 @import "tailwindcss";
 
+.comment-control {
+  position: relative;
+  display: flex;
+}
+.comment-list-mark {
+  position: absolute;
+  margin: 9px 0 0 13px;
+  padding: 0 !important;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  color: currentColor;
+  background: #fff;
+  border-radius: 3px;
+}
+.comment-popover {
+  position: absolute;
+  left: 0;
+  top: 36px;
+  min-width: 350px;
+  width: 350px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #dedee2;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px #0003;
+  z-index: 150;
+  color: #18181b;
+}
+.comment-popover > strong {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.comment-popover textarea {
+  width: 100%;
+  height: 92px;
+  padding: 9px;
+  border: 1px solid #dedee2;
+  border-radius: 6px;
+  resize: vertical;
+  outline: none;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.comment-popover textarea:focus {
+  border-color: #7150ff;
+  box-shadow: 0 0 0 2px #7150ff18;
+}
+.comment-popover-footer {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.comment-popover-footer > span {
+  width: auto !important;
+  margin: 0 !important;
+  background: none !important;
+  color: #a1a1aa;
+  font-size: 9px;
+}
+.tool-group .comment-popover-footer > button {
+  width: auto;
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 5px;
+  background: #6d4aff;
+  color: #fff;
+  display: block;
+}
+.tool-group .comment-popover-footer > button:disabled {
+  opacity: 0.45;
+}
+.comment-popover > p {
+  margin: 8px 0 0;
+  color: #dc2626;
+  font-size: 10px;
+}
+.comment-list-popover {
+  max-height: 390px;
+  overflow: auto;
+}
+.comment-state {
+  padding: 24px 8px;
+  text-align: center;
+  color: #a1a1aa;
+  font-size: 11px;
+}
+.comment-state.error {
+  color: #dc2626;
+}
+.comment-items {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.comment-items article {
+  padding: 9px;
+  border: 1px solid #ececf0;
+  border-radius: 6px;
+  background: #fafafa;
+}
+.comment-items article > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.comment-items article b {
+  font-size: 10px;
+}
+.comment-items article time {
+  color: #a1a1aa;
+  font-size: 8px;
+}
+.comment-items article p {
+  margin: 7px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .page-label > span {
   min-width: 0;
   max-width: 185px;
@@ -198,7 +323,11 @@
   flex: none;
   margin: 0 auto;
 }
-.artboard-zoom-stage > .artboard {
+.canvas-workspace {
+  position: relative;
+  transform-origin: top left;
+}
+.canvas-workspace > .artboard {
   transform-origin: top left !important;
   transition:
     width 0.2s,
@@ -450,6 +579,11 @@
   border: 1px solid #d9d9dc;
   border-radius: 4px;
   box-shadow: 0 8px 24px #0002;
+  z-index: 1;
+}
+.canvas-context-menu.submenu-left .order-submenu {
+  right: calc(100% + 5px);
+  left: auto;
 }
 .order-menu-group:hover > .order-submenu,
 .order-menu-group:focus-within > .order-submenu {
@@ -641,9 +775,38 @@
   top: 0;
 }
 .resize-overlay {
-  pointer-events: auto !important;
+  pointer-events: none !important;
+  touch-action: none;
+}
+.move-edge {
+  position: absolute;
+  pointer-events: auto;
   cursor: move;
   touch-action: none;
+}
+.move-edge.top,
+.move-edge.bottom {
+  right: 6px;
+  left: 6px;
+  height: 8px;
+}
+.move-edge.top {
+  top: -4px;
+}
+.move-edge.bottom {
+  bottom: -4px;
+}
+.move-edge.right,
+.move-edge.left {
+  top: 6px;
+  bottom: 6px;
+  width: 8px;
+}
+.move-edge.right {
+  right: -4px;
+}
+.move-edge.left {
+  left: -4px;
 }
 .resize-handle {
   width: 12px !important;
@@ -1284,7 +1447,7 @@ button {
   overflow: auto;
   padding: 45px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: flex-start;
   background-color: #ededee;
   background-image: radial-gradient(#d3d3d5 0.7px, transparent 0.7px);
@@ -1295,7 +1458,7 @@ button {
   height: 560px;
   background: #f7f4ef;
   box-shadow: 0 3px 18px #0002;
-  position: relative;
+  position: absolute;
   overflow: hidden;
   transition: width 0.2s;
 }

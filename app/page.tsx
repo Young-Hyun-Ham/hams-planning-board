@@ -32,6 +32,7 @@ export default function Home() {
   const [projectId, setProjectId] = useState<string>();
   const [documentTitle, setDocumentTitle] = useState("Page");
   const [saved, setSaved] = useState("저장됨");
+  const [focusRequestKey, setFocusRequestKey] = useState(0);
   const selectedName = useMemo(
     () => findLayerName(selected, layers),
     [selected, layers],
@@ -108,6 +109,7 @@ export default function Home() {
     setSizes((current) => ({ ...current, [id]: defaultSize }));
     setPositions((current) => ({ ...current, [id]: { x: 0, y: 0 } }));
     setSelected(id);
+    setFocusRequestKey((current) => current + 1);
   };
   const deleteFromTree = (items: Layer[], id: string): Layer[] =>
     items
@@ -206,6 +208,7 @@ export default function Home() {
   };
   const addPage = () => {
     const id = `custom-page-${Date.now()}`;
+    const pageCount = layers.filter((item) => item.kind === "page").length;
     setLayers((current) => [
       ...current,
       {
@@ -215,7 +218,12 @@ export default function Home() {
         children: [],
       },
     ]);
+    setPositions((current) => ({
+      ...current,
+      [id]: { x: pageCount * 940, y: 0 },
+    }));
     setSelected(id);
+    setFocusRequestKey((current) => current + 1);
     setSaved("새 페이지 추가됨");
   };
   const saveProject = async () => {
@@ -373,6 +381,8 @@ export default function Home() {
           generating={generating}
         />
         <CanvasEditor
+          projectId={projectId}
+          focusRequestKey={focusRequestKey}
           layers={layers}
           sizes={sizes}
           positions={positions}
