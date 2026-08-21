@@ -441,34 +441,45 @@ export function LeftPanel({
         >
           {canHaveChildren && (
             <>
-              <div className="context-title">{menu.layer.name}에 추가</div>
-              {additions.map((item) => (
-                <button
-                  key={item.kind}
-                  onClick={() => {
-                    onAdd(menu.layer.id, item.kind);
-                    setMenu(null);
-                  }}
-                >
-                  <Icon
-                    name={
-                      item.kind === "section"
-                        ? "frame"
-                        : item.kind === "layer"
-                          ? "group"
-                          : item.kind
-                    }
-                    size={14}
-                  />
-                  <span>{item.label}</span>
+              <div className="layer-add-group">
+                <button className="layer-add-trigger">
+                  <Icon name="plus" size={14} />
+                  <span>{menu.layer.name}에 추가</span>
+                  <span className="context-arrow">▸</span>
                 </button>
-              ))}
+                <div className="layer-add-submenu">
+                  {additions.map((item) => (
+                    <button
+                      key={item.kind}
+                      onClick={() => {
+                        onAdd(menu.layer.id, item.kind);
+                        setMenu(null);
+                      }}
+                    >
+                      <Icon
+                        name={
+                          item.kind === "section"
+                            ? "frame"
+                            : item.kind === "layer"
+                              ? "group"
+                              : item.kind
+                        }
+                        size={14}
+                      />
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="context-separator" />
             </>
           )}
           <button
             className="context-delete"
-            disabled={menu.layer.kind === "page"}
+            disabled={
+              menu.layer.kind === "page" &&
+              layers.filter((item) => item.kind === "page").length <= 1
+            }
             onClick={() => {
               onDelete(menu.layer.id);
               setMenu(null);

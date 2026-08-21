@@ -11,6 +11,7 @@ type SaveBody = {
   positions?: unknown;
   layerText?: unknown;
   layerImages?: unknown;
+  layerStyles?: unknown;
   selected?: unknown;
 };
 
@@ -52,6 +53,7 @@ export async function GET(request: Request) {
           positions: data.positions,
           layerText: data.layerText,
           layerImages: data.layerImages,
+          layerStyles: data.layerStyles,
           selected: data.selected,
         },
       });
@@ -129,6 +131,10 @@ export async function POST(request: Request) {
       layerImages:
         body.layerImages && typeof body.layerImages === "object"
           ? body.layerImages
+          : {},
+      layerStyles:
+        body.layerStyles && typeof body.layerStyles === "object"
+          ? body.layerStyles
           : {},
       selected: typeof body.selected === "string" ? body.selected : "page",
       updatedAt: FieldValue.serverTimestamp(),

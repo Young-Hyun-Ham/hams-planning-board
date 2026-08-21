@@ -7,6 +7,7 @@ import type {
   Layer,
   LayerPosition,
   LayerSize,
+  LayerStyle,
   UpdateContent,
 } from "./types";
 
@@ -98,12 +99,15 @@ export function CanvasEditor({
   positions,
   layerText,
   layerImages,
+  layerStyles,
   onResize,
   onMove,
   onReorder,
   onDelete,
+  onAdd,
   projectId,
   focusRequestKey,
+  focusPageId,
   selected,
   content,
   onSelect,
@@ -114,6 +118,7 @@ export function CanvasEditor({
   positions: Record<string, LayerPosition>;
   layerText: Record<string, string>;
   layerImages: Record<string, string>;
+  layerStyles: Record<string, LayerStyle>;
   onResize: (id: string, size: LayerSize) => void;
   onMove: (id: string, position: LayerPosition) => void;
   onReorder: (
@@ -121,8 +126,10 @@ export function CanvasEditor({
     action: "front" | "forward" | "backward" | "back",
   ) => void;
   onDelete: (id: string) => void;
+  onAdd: (parentId: string, kind: Layer["kind"]) => void;
   projectId?: string;
   focusRequestKey: number;
+  focusPageId: string;
   selected: string;
   content: EditableContent;
   onSelect: (id: string) => void;
@@ -189,17 +196,52 @@ export function CanvasEditor({
   const orderMap = new Map(
     flatten(layers).map((item, index) => [item.id, index + 1]),
   );
-  const styleFor = (id: string): React.CSSProperties => ({
-    width: sizes[id]?.width,
-    height: sizes[id]?.height,
-    maxWidth: sizes[id] ? "none" : undefined,
-    position: positions[id] ? "absolute" : undefined,
-    left: positions[id]?.x,
-    top: positions[id]?.y,
-    transform: "none",
-    zIndex: orderMap.get(id),
-  });
+  const styleFor = (id: string): React.CSSProperties => {
+    const layerStyle = layerStyles[id] ?? {};
+    const effectStyle: React.CSSProperties =
+      layerStyle.effect === "shadow"
+        ? { boxShadow: "0 8px 20px rgb(0 0 0 / 25%)" }
+        : layerStyle.effect === "soft-shadow"
+          ? { boxShadow: "0 16px 40px rgb(0 0 0 / 14%)" }
+          : layerStyle.effect === "blur"
+            ? { filter: "blur(3px)" }
+            : layerStyle.effect === "grayscale"
+              ? { filter: "grayscale(1)" }
+              : layerStyle.effect === "text-shadow"
+                ? { textShadow: "0 3px 8px rgb(0 0 0 / 30%)" }
+                : {};
+    return {
+      width: sizes[id]?.width,
+      height: sizes[id]?.height,
+      maxWidth: sizes[id] ? "none" : undefined,
+      position: positions[id] ? "absolute" : undefined,
+      left: positions[id]?.x,
+      top: positions[id]?.y,
+      transform: "none",
+      zIndex: orderMap.get(id),
+      fontSize: layerStyle.fontSize,
+      lineHeight: layerStyle.lineHeight,
+      fontWeight: layerStyle.fontWeight,
+      color: layerStyle.color,
+      backgroundColor: layerStyle.backgroundColor,
+      opacity: layerStyle.opacity,
+      borderRadius: layerStyle.borderRadius,
+      ...effectStyle,
+    };
+  };
   const selectedLayer = flatten(layers).find((item) => item.id === selected);
+  const canAddToSelected =
+    selectedLayer?.kind === "page" ||
+    selectedLayer?.kind === "section" ||
+    selectedLayer?.kind === "layer";
+  const additions: { kind: Layer["kind"]; label: string }[] = [
+    { kind: "layer", label: "Layer" },
+    { kind: "section", label: "Section" },
+    { kind: "text", label: "Text" },
+    { kind: "image", label: "Image" },
+    { kind: "clipboard", label: "Clipboard" },
+    { kind: "button", label: "Button" },
+  ];
   const pages = layers.filter(
     (item) => item.kind === "page" && item.visible !== false,
   );
@@ -208,22 +250,21 @@ export function CanvasEditor({
   const pagePosition = (page: Layer, index: number): LayerPosition =>
     positions[page.id] ?? { x: index * (defaultPageWidth + 80), y: 0 };
   const workspaceWidth = Math.max(
-    2400,
+    defaultPageWidth,
     ...pages.map((page, index) =>
       Math.max(
         0,
         pagePosition(page, index).x +
-          (sizes[page.id]?.width ?? defaultPageWidth) +
-          400,
+          (sizes[page.id]?.width ?? defaultPageWidth),
       ),
     ),
   );
   const workspaceHeight = Math.max(
-    1600,
+    560,
     ...pages.map((page, index) =>
       Math.max(
         0,
-        pagePosition(page, index).y + (sizes[page.id]?.height ?? 560) + 400,
+        pagePosition(page, index).y + (sizes[page.id]?.height ?? 560),
       ),
     ),
   );
@@ -429,7 +470,7 @@ export function CanvasEditor({
       secondFrame = requestAnimationFrame(() => {
         const canvas = canvasRef.current;
         const node = artboardRef.current?.querySelector<HTMLElement>(
-          `[data-layer-id="${CSS.escape(selected)}"]`,
+          `[data-layer-id="${CSS.escape(focusPageId)}"]`,
         );
         if (!canvas || !node) return;
         const canvasRect = canvas.getBoundingClientRect();
@@ -453,7 +494,7 @@ export function CanvasEditor({
       cancelAnimationFrame(firstFrame);
       cancelAnimationFrame(secondFrame);
     };
-  }, [focusRequestKey, selected]);
+  }, [focusPageId, focusRequestKey]);
 
   const beginResize = (
     event: React.PointerEvent,
@@ -883,6 +924,7 @@ export function CanvasEditor({
               <div
                 key={page.id}
                 style={{
+                  ...styleFor(page.id),
                   left: pagePosition(page, pageIndex).x,
                   top: pagePosition(page, pageIndex).y,
                   width: sizes[page.id]?.width,
@@ -1126,6 +1168,40 @@ export function CanvasEditor({
             style={{ left: orderMenu.x, top: orderMenu.y }}
             onPointerDown={(event) => event.stopPropagation()}
           >
+            {canAddToSelected && selectedLayer && (
+              <>
+                <div className="canvas-add-group">
+                  <button className="canvas-add-trigger">
+                    <span className="order-symbol">＋</span>
+                    <span>{selectedLayer.name}에 추가</span>
+                    <span className="submenu-arrow">▸</span>
+                  </button>
+                  <div className="canvas-add-submenu">
+                    {additions.map((item) => (
+                      <button
+                        key={item.kind}
+                        onClick={() => {
+                          onAdd(selectedLayer.id, item.kind);
+                          setOrderMenu(null);
+                        }}
+                      >
+                        <Icon
+                          name={
+                            item.kind === "section"
+                              ? "frame"
+                              : item.kind === "layer"
+                                ? "group"
+                                : item.kind
+                          }
+                          size={14}
+                        />
+                        <span>{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
             <div className="order-menu-group">
               <button className="order-menu-trigger">
                 <span className="order-symbol">▣</span>
@@ -1174,7 +1250,7 @@ export function CanvasEditor({
             <div className="canvas-menu-separator" />
             <button
               className="canvas-delete-button"
-              disabled={selected === "page"}
+              disabled={selectedLayer?.kind === "page" && pages.length <= 1}
               onClick={() => {
                 onDelete(selected);
                 setOrderMenu(null);

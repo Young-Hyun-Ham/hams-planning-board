@@ -16,6 +16,7 @@ import type {
   Layer,
   LayerPosition,
   LayerSize,
+  LayerStyle,
 } from "@/components/planning/types";
 
 export default function Home() {
@@ -25,6 +26,9 @@ export default function Home() {
   const [positions, setPositions] = useState<Record<string, LayerPosition>>({});
   const [layerText, setLayerText] = useState<Record<string, string>>({});
   const [layerImages, setLayerImages] = useState<Record<string, string>>({});
+  const [layerStyles, setLayerStyles] = useState<Record<string, LayerStyle>>(
+    {},
+  );
   const [content, setContent] = useState<EditableContent>(initialContent);
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -33,6 +37,7 @@ export default function Home() {
   const [documentTitle, setDocumentTitle] = useState("Page");
   const [saved, setSaved] = useState("저장됨");
   const [focusRequestKey, setFocusRequestKey] = useState(0);
+  const [focusPageId, setFocusPageId] = useState("page");
   const selectedName = useMemo(
     () => findLayerName(selected, layers),
     [selected, layers],
@@ -41,6 +46,13 @@ export default function Home() {
     () => findLayerById(selected, layers),
     [selected, layers],
   );
+  const selectLayer = (id: string) => {
+    setSelected(id);
+    if (findLayerById(id, layers)?.kind === "page") {
+      setFocusPageId(id);
+      setFocusRequestKey((current) => current + 1);
+    }
+  };
 
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
@@ -109,7 +121,6 @@ export default function Home() {
     setSizes((current) => ({ ...current, [id]: defaultSize }));
     setPositions((current) => ({ ...current, [id]: { x: 0, y: 0 } }));
     setSelected(id);
-    setFocusRequestKey((current) => current + 1);
   };
   const deleteFromTree = (items: Layer[], id: string): Layer[] =>
     items
@@ -159,7 +170,12 @@ export default function Home() {
     setSaved("레이어 순서 수정됨");
   };
   const deleteLayer = (id: string) => {
-    if (id === "page") return;
+    const target = findLayerById(id, layers);
+    const pageCount = layers.filter((item) => item.kind === "page").length;
+    if (target?.kind === "page" && pageCount <= 1) return;
+    const remainingPages = layers.filter(
+      (item) => item.kind === "page" && item.id !== id,
+    );
     setLayers((current) => deleteFromTree(current, id));
     setSizes((current) => {
       const next = { ...current };
@@ -181,7 +197,12 @@ export default function Home() {
       delete next[id];
       return next;
     });
-    setSelected("page");
+    setLayerStyles((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setSelected(remainingPages[0]?.id ?? "page");
   };
   const updateLayerState = (id: string, update: (layer: Layer) => Layer) => {
     const change = (items: Layer[]): Layer[] =>
@@ -223,6 +244,7 @@ export default function Home() {
       [id]: { x: pageCount * 940, y: 0 },
     }));
     setSelected(id);
+    setFocusPageId(id);
     setFocusRequestKey((current) => current + 1);
     setSaved("새 페이지 추가됨");
   };
@@ -243,6 +265,7 @@ export default function Home() {
           positions,
           layerText,
           layerImages,
+          layerStyles,
           selected,
         }),
       });
@@ -262,7 +285,11 @@ export default function Home() {
     }
   };
   const deleteSelectedPage = () => {
-    if (selectedLayer?.kind !== "page" || selectedLayer.id === "page") return;
+    if (
+      selectedLayer?.kind !== "page" ||
+      layers.filter((item) => item.kind === "page").length <= 1
+    )
+      return;
     deleteLayer(selectedLayer.id);
     setSaved("페이지 삭제됨");
   };
@@ -281,6 +308,7 @@ export default function Home() {
         positions?: unknown;
         layerText?: unknown;
         layerImages?: unknown;
+        layerStyles?: unknown;
         selected?: unknown;
       };
       error?: string;
@@ -309,6 +337,11 @@ export default function Home() {
     setLayerImages(
       project.layerImages && typeof project.layerImages === "object"
         ? (project.layerImages as Record<string, string>)
+        : {},
+    );
+    setLayerStyles(
+      project.layerStyles && typeof project.layerStyles === "object"
+        ? (project.layerStyles as Record<string, LayerStyle>)
         : {},
     );
     setPrompt(typeof project.prompt === "string" ? project.prompt : "");
@@ -361,7 +394,7 @@ export default function Home() {
           }}
           layers={layers}
           selected={selected}
-          onSelect={setSelected}
+          onSelect={selectLayer}
           onRename={renameLayer}
           onAdd={addLayer}
           onDelete={deleteLayer}
@@ -372,7 +405,8 @@ export default function Home() {
           onDeletePage={deleteSelectedPage}
           onOpenProject={openProject}
           canDeletePage={
-            selectedLayer?.kind === "page" && selectedLayer.id !== "page"
+            selectedLayer?.kind === "page" &&
+            layers.filter((item) => item.kind === "page").length > 1
           }
           saving={saving}
           prompt={prompt}
@@ -383,12 +417,15 @@ export default function Home() {
         <CanvasEditor
           projectId={projectId}
           focusRequestKey={focusRequestKey}
+          focusPageId={focusPageId}
           layers={layers}
           sizes={sizes}
           positions={positions}
           layerText={layerText}
           layerImages={layerImages}
+          layerStyles={layerStyles}
           onDelete={deleteLayer}
+          onAdd={addLayer}
           onReorder={reorderLayer}
           onResize={(id, size) => {
             setSizes((current) => ({ ...current, [id]: size }));
@@ -400,7 +437,7 @@ export default function Home() {
           }}
           selected={selected}
           content={content}
-          onSelect={setSelected}
+          onSelect={selectLayer}
           onUpdate={updateContent}
         />
         <RightPanel
@@ -410,6 +447,7 @@ export default function Home() {
           content={content}
           layerText={layerText[selected] ?? selectedName}
           imageSrc={layerImages[selected]}
+          layerStyle={layerStyles[selected] ?? {}}
           size={sizes[selected]}
           position={positions[selected]}
           onLayerText={(value) => {
@@ -419,6 +457,21 @@ export default function Home() {
           onImage={(value) => {
             setLayerImages((current) => ({ ...current, [selected]: value }));
             setSaved("이미지 변경됨");
+          }}
+          onSize={(size) => {
+            setSizes((current) => ({ ...current, [selected]: size }));
+            setSaved("크기 수정됨");
+          }}
+          onPosition={(position) => {
+            setPositions((current) => ({ ...current, [selected]: position }));
+            setSaved("위치 수정됨");
+          }}
+          onLayerStyle={(style) => {
+            setLayerStyles((current) => ({
+              ...current,
+              [selected]: { ...current[selected], ...style },
+            }));
+            setSaved("스타일 수정됨");
           }}
           onUpdate={updateContent}
         />
