@@ -296,6 +296,10 @@ export function LeftPanel({
     { kind: "image", label: "Image" },
     { kind: "clipboard", label: "Clipboard" },
     { kind: "button", label: "Button" },
+    { kind: "checkbox", label: "Checkbox" },
+    { kind: "radio", label: "Radio" },
+    { kind: "select", label: "Select" },
+    { kind: "icon", label: "Icon" },
   ];
   const canHaveChildren =
     menu &&
@@ -308,7 +312,7 @@ export function LeftPanel({
     onSelect(layer.id);
     setMenu({
       x: Math.min(event.clientX, window.innerWidth - 170),
-      y: Math.min(event.clientY, window.innerHeight - 270),
+      y: Math.min(event.clientY, window.innerHeight - 390),
       layer,
     });
   };

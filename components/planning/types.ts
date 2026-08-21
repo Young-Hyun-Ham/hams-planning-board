@@ -1,14 +1,32 @@
+export type ElementKind =
+  | "page"
+  | "section"
+  | "layer"
+  | "text"
+  | "image"
+  | "clipboard"
+  | "button"
+  | "checkbox"
+  | "radio"
+  | "select"
+  | "icon";
+
+export type IconType = "" | "svg" | "mui";
+export type OptionOrientation = "horizontal" | "vertical";
+export type LayerOption = { display: string; value: string };
+
 export type Layer = {
   id: string;
   name: string;
-  kind:
-    | "page"
-    | "section"
-    | "layer"
-    | "text"
-    | "image"
-    | "clipboard"
-    | "button";
+  kind: ElementKind;
+  iconType?: IconType;
+  iconInstance?: string;
+  iconSize?: number;
+  iconColor?: string;
+  optionLabel?: string;
+  optionCount?: number;
+  optionOrientation?: OptionOrientation;
+  optionItems?: LayerOption[];
   template?: boolean;
   visible?: boolean;
   locked?: boolean;
@@ -35,19 +53,3 @@ export type LayerStyle = {
   borderRadius?: number;
   effect?: LayerEffect;
 };
-
-export type EditableContent = {
-  logo: string;
-  menuAbout: string;
-  menuProjects: string;
-  menuContact: string;
-  eyebrow: string;
-  heading: string;
-  description: string;
-  cta: string;
-};
-
-export type UpdateContent = <K extends keyof EditableContent>(
-  key: K,
-  value: EditableContent[K],
-) => void;

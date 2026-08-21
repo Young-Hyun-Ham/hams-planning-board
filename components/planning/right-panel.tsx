@@ -1,14 +1,14 @@
-import { useState } from "react";
-import { createPublishingCode } from "./editor-data";
+import { useEffect, useState } from "react";
+import { muiIcons } from "../icons/mui";
+import { svgIcons } from "../icons/svg";
+import {
+  captureCanvasSource,
+  createPublishingCode,
+  type PublishingCode,
+  type PublishingTarget,
+} from "./editor-data";
 import { Icon } from "./icon";
-import type {
-  EditableContent,
-  Layer,
-  LayerPosition,
-  LayerSize,
-  LayerStyle,
-  UpdateContent,
-} from "./types";
+import type { Layer, LayerPosition, LayerSize, LayerStyle } from "./types";
 
 function Property({
   title,
@@ -56,19 +56,9 @@ function Field({
   );
 }
 
-const fieldByLayer: Partial<Record<string, keyof EditableContent>> = {
-  logo: "logo",
-  eyebrow: "eyebrow",
-  heading: "heading",
-  description: "description",
-  cta: "cta",
-};
-
 export function RightPanel({
-  selected,
   selectedName,
   selectedLayer,
-  content,
   layerText,
   imageSrc,
   layerStyle,
@@ -79,12 +69,11 @@ export function RightPanel({
   onSize,
   onPosition,
   onLayerStyle,
-  onUpdate,
+  onIconProperties,
+  onOptionProperties,
 }: {
-  selected: string;
   selectedName: string;
   selectedLayer?: Layer;
-  content: EditableContent;
   layerText: string;
   imageSrc?: string;
   layerStyle: LayerStyle;
@@ -95,14 +84,63 @@ export function RightPanel({
   onSize: (size: LayerSize) => void;
   onPosition: (position: LayerPosition) => void;
   onLayerStyle: (style: Partial<LayerStyle>) => void;
-  onUpdate: UpdateContent;
+  onIconProperties: (
+    properties: Pick<
+      Layer,
+      "iconType" | "iconInstance" | "iconSize" | "iconColor"
+    >,
+  ) => void;
+  onOptionProperties: (
+    properties: Pick<
+      Layer,
+      "optionLabel" | "optionCount" | "optionOrientation" | "optionItems"
+    >,
+  ) => void;
 }) {
   const [tab, setTab] = useState<"design" | "code">("design");
-  const field = fieldByLayer[selected];
+  const [codes, setCodes] = useState<PublishingCode>(() =>
+    createPublishingCode(""),
+  );
+  const [copyModes, setCopyModes] = useState<
+    Record<PublishingTarget, "original" | "single-line">
+  >({
+    css: "original",
+    html5: "original",
+    react: "original",
+    astro: "original",
+    svelte: "original",
+  });
+  const [copiedTarget, setCopiedTarget] = useState<PublishingTarget | null>(
+    null,
+  );
+  const [expandedCodeSections, setExpandedCodeSections] = useState<
+    Record<PublishingTarget, boolean>
+  >({
+    css: false,
+    html5: false,
+    react: false,
+    astro: false,
+    svelte: false,
+  });
   const isImage =
     selectedLayer?.kind === "image" || selectedLayer?.kind === "clipboard";
   const isText =
     selectedLayer?.kind === "text" || selectedLayer?.kind === "button";
+  const isIcon = selectedLayer?.kind === "icon";
+  const isOption =
+    selectedLayer?.kind === "checkbox" || selectedLayer?.kind === "radio";
+  const iconInstances =
+    selectedLayer?.iconType === "svg"
+      ? Object.keys(svgIcons)
+      : selectedLayer?.iconType === "mui"
+        ? Object.keys(muiIcons)
+        : [];
+  const optionCount = Math.max(1, selectedLayer?.optionCount ?? 1);
+  const optionItems = Array.from({ length: optionCount }, (_, index) =>
+    selectedLayer?.optionItems?.[index]
+      ? selectedLayer.optionItems[index]
+      : { display: `Option ${index + 1}`, value: "Option" },
+  );
   const effectOptions = isText
     ? (["none", "text-shadow", "shadow"] as const)
     : isImage
@@ -118,7 +156,61 @@ export function RightPanel({
     };
     reader.readAsDataURL(file);
   };
-  const code = createPublishingCode();
+  useEffect(() => {
+    if (tab !== "code") return;
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      const source = captureCanvasSource();
+      void fetch("/api/format-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(source),
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("코드 포맷에 실패했습니다.");
+          return (await response.json()) as { codes: PublishingCode };
+        })
+        .then(({ codes: formattedCodes }) => {
+          if (!cancelled) setCodes(formattedCodes);
+        })
+        .catch(() => {
+          if (!cancelled)
+            setCodes(
+              createPublishingCode(
+                source.markup,
+                source.css,
+                source.reactMarkup,
+              ),
+            );
+        });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [tab]);
+
+  const singleLine = (code: string) =>
+    code
+      .split("\n")
+      .map((line) => line.trim())
+      .join("");
+  const copyCode = async (target: PublishingTarget) => {
+    const code =
+      copyModes[target] === "single-line"
+        ? singleLine(codes[target])
+        : codes[target];
+    await navigator.clipboard.writeText(code);
+    setCopiedTarget(target);
+    window.setTimeout(() => setCopiedTarget(null), 1200);
+  };
+  const codeSections: { target: PublishingTarget; label: string }[] = [
+    { target: "css", label: "CSS" },
+    { target: "html5", label: "HTML5" },
+    { target: "react", label: "React" },
+    { target: "astro", label: "Astro" },
+    { target: "svelte", label: "Svelte" },
+  ];
   return (
     <aside className="right-panel">
       <div className="inspector-tabs">
@@ -141,27 +233,17 @@ export function RightPanel({
             <span>{selectedName}</span>
             <Icon name="more" size={16} />
           </div>
-          {field && (
+          {(selectedLayer?.kind === "text" ||
+            selectedLayer?.kind === "button") && (
             <Property title="콘텐츠">
               <textarea
                 className="content-field"
-                value={content[field]}
-                onChange={(event) => onUpdate(field, event.target.value)}
+                value={layerText}
+                onChange={(event) => onLayerText(event.target.value)}
+                placeholder="텍스트를 입력하세요"
               />
             </Property>
           )}
-          {!field &&
-            (selectedLayer?.kind === "text" ||
-              selectedLayer?.kind === "button") && (
-              <Property title="콘텐츠">
-                <textarea
-                  className="content-field"
-                  value={layerText}
-                  onChange={(event) => onLayerText(event.target.value)}
-                  placeholder="텍스트를 입력하세요"
-                />
-              </Property>
-            )}
           {isImage && (
             <Property
               title={
@@ -200,6 +282,186 @@ export function RightPanel({
                   이미지를 복사한 후 Ctrl+V로 붙여넣을 수 있습니다.
                 </p>
               )}
+            </Property>
+          )}
+          {isIcon && (
+            <Property title="컴포넌트 속성">
+              <label className="component-option">
+                <span>Type</span>
+                <select
+                  value={selectedLayer.iconType ?? ""}
+                  onChange={(event) =>
+                    onIconProperties({
+                      iconType: event.target.value as Layer["iconType"],
+                      iconInstance: "",
+                      iconSize: selectedLayer.iconSize,
+                      iconColor: selectedLayer.iconColor,
+                    })
+                  }
+                >
+                  <option value="">선택 안 함</option>
+                  <option value="svg">SVG Icon</option>
+                  <option value="mui">Mui Icon</option>
+                </select>
+              </label>
+              <label className="component-option">
+                <span>Icon instance</span>
+                <select
+                  value={selectedLayer.iconInstance ?? ""}
+                  disabled={!selectedLayer.iconType}
+                  onChange={(event) =>
+                    onIconProperties({
+                      iconType: selectedLayer.iconType,
+                      iconInstance: event.target.value,
+                      iconSize: selectedLayer.iconSize,
+                      iconColor: selectedLayer.iconColor,
+                    })
+                  }
+                >
+                  <option value="">아이콘 선택</option>
+                  {iconInstances.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="component-option">
+                <span>Size</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={selectedLayer.iconSize ?? 22}
+                  onChange={(event) =>
+                    onIconProperties({
+                      iconType: selectedLayer.iconType,
+                      iconInstance: selectedLayer.iconInstance,
+                      iconSize: Math.max(1, Number(event.target.value)),
+                      iconColor: selectedLayer.iconColor,
+                    })
+                  }
+                />
+              </label>
+              <label className="component-option">
+                <span>Color</span>
+                <span className="component-color-control">
+                  <input
+                    type="color"
+                    value={selectedLayer.iconColor ?? "#6545e8"}
+                    onChange={(event) =>
+                      onIconProperties({
+                        iconType: selectedLayer.iconType,
+                        iconInstance: selectedLayer.iconInstance,
+                        iconSize: selectedLayer.iconSize,
+                        iconColor: event.target.value,
+                      })
+                    }
+                  />
+                  <span>{selectedLayer.iconColor ?? "#6545e8"}</span>
+                </span>
+              </label>
+            </Property>
+          )}
+          {isOption && (
+            <Property title="컴포넌트 속성">
+              <label className="component-option">
+                <span>Option count</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={selectedLayer.optionCount ?? 1}
+                  onChange={(event) =>
+                    onOptionProperties({
+                      optionLabel: selectedLayer.optionLabel,
+                      optionCount: Math.max(
+                        1,
+                        Math.min(20, Number(event.target.value)),
+                      ),
+                      optionOrientation: selectedLayer.optionOrientation,
+                      optionItems: Array.from(
+                        {
+                          length: Math.max(
+                            1,
+                            Math.min(20, Number(event.target.value)),
+                          ),
+                        },
+                        (_, index) =>
+                          optionItems[index] ?? {
+                            display: `Option ${index + 1}`,
+                            value: "Option",
+                          },
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <label className="component-option">
+                <span>Direction</span>
+                <select
+                  value={selectedLayer.optionOrientation ?? "horizontal"}
+                  onChange={(event) =>
+                    onOptionProperties({
+                      optionLabel: selectedLayer.optionLabel,
+                      optionCount: selectedLayer.optionCount,
+                      optionOrientation: event.target
+                        .value as Layer["optionOrientation"],
+                      optionItems,
+                    })
+                  }
+                >
+                  <option value="horizontal">수평</option>
+                  <option value="vertical">수직</option>
+                </select>
+              </label>
+              <div className="option-editor">
+                <div className="option-editor-head">
+                  <span>No</span>
+                  <span>Display</span>
+                  <span>Value</span>
+                </div>
+                {optionItems.map((option, index) => (
+                  <div className="option-editor-row" key={index}>
+                    <span>{index + 1}</span>
+                    <input
+                      type="text"
+                      value={option.display}
+                      onChange={(event) => {
+                        const nextOptions = optionItems.map(
+                          (item, itemIndex) =>
+                            itemIndex === index
+                              ? { ...item, display: event.target.value }
+                              : item,
+                        );
+                        onOptionProperties({
+                          optionLabel: selectedLayer.optionLabel,
+                          optionCount,
+                          optionOrientation: selectedLayer.optionOrientation,
+                          optionItems: nextOptions,
+                        });
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={option.value}
+                      onChange={(event) => {
+                        const nextOptions = optionItems.map(
+                          (item, itemIndex) =>
+                            itemIndex === index
+                              ? { ...item, value: event.target.value }
+                              : item,
+                        );
+                        onOptionProperties({
+                          optionLabel: selectedLayer.optionLabel,
+                          optionCount,
+                          optionOrientation: selectedLayer.optionOrientation,
+                          optionItems: nextOptions,
+                        });
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
             </Property>
           )}
           <Property title="레이아웃">
@@ -349,17 +611,82 @@ export function RightPanel({
         </div>
       ) : (
         <div className="code-panel">
-          <div className="code-head">
-            <span>HTML</span>
-            <button onClick={() => navigator.clipboard?.writeText(code)}>
-              복사
-            </button>
+          <div className="code-panel-scroll">
+            {codeSections.map(({ target, label }) => (
+              <section className="code-section" key={target}>
+                <div className="code-head">
+                  <button
+                    type="button"
+                    className="code-section-toggle"
+                    aria-expanded={expandedCodeSections[target]}
+                    onClick={() =>
+                      setExpandedCodeSections((current) => ({
+                        ...current,
+                        [target]: !current[target],
+                      }))
+                    }
+                  >
+                    <Icon
+                      name={expandedCodeSections[target] ? "down" : "chevron"}
+                      size={12}
+                    />
+                    <strong>{label}</strong>
+                  </button>
+                  <div className="code-actions">
+                    <div className="copy-mode-toggle">
+                      <button
+                        className={
+                          copyModes[target] === "original" ? "active" : ""
+                        }
+                        onClick={() =>
+                          setCopyModes((current) => ({
+                            ...current,
+                            [target]: "original",
+                          }))
+                        }
+                      >
+                        원본
+                      </button>
+                      <button
+                        className={
+                          copyModes[target] === "single-line" ? "active" : ""
+                        }
+                        onClick={() =>
+                          setCopyModes((current) => ({
+                            ...current,
+                            [target]: "single-line",
+                          }))
+                        }
+                      >
+                        한 줄
+                      </button>
+                    </div>
+                    <button
+                      className="copy-code-button"
+                      onClick={() => void copyCode(target)}
+                    >
+                      {copiedTarget === target ? "복사됨" : "복사"}
+                    </button>
+                  </div>
+                </div>
+                {expandedCodeSections[target] && (
+                  <textarea
+                    className="code-textarea"
+                    value={
+                      copyModes[target] === "single-line"
+                        ? singleLine(codes[target])
+                        : codes[target]
+                    }
+                    readOnly
+                    spellCheck={false}
+                    aria-label={`${label} 생성 코드`}
+                  />
+                )}
+              </section>
+            ))}
           </div>
-          <pre>
-            <code>{code}</code>
-          </pre>
           <div className="code-note">
-            편집한 텍스트가 코드에 실시간 반영됩니다.
+            코드 탭을 열 때 현재 캔버스의 화면과 스타일을 캡처합니다.
           </div>
         </div>
       )}

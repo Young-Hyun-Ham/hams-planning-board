@@ -1,89 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { muiIcons } from "../icons/mui";
+import { svgIcons } from "../icons/svg";
 import { Icon } from "./icon";
 import type {
   Device,
-  EditableContent,
   Layer,
   LayerPosition,
   LayerSize,
   LayerStyle,
-  UpdateContent,
 } from "./types";
-
-function EditableText({
-  id,
-  selectId = id,
-  field,
-  value,
-  selected,
-  editing,
-  className = "",
-  onSelect,
-  onEdit,
-  onUpdate,
-  multiline = false,
-  as = "span",
-  style,
-}: {
-  id: string;
-  selectId?: string;
-  field: keyof EditableContent;
-  value: string;
-  selected: boolean;
-  editing: boolean;
-  className?: string;
-  onSelect: (event: React.MouseEvent, id: string) => void;
-  onEdit: (id: string) => void;
-  onUpdate: UpdateContent;
-  multiline?: boolean;
-  as?: "span" | "b" | "h1" | "p";
-  style?: React.CSSProperties;
-}) {
-  const Tag = as,
-    elementRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!editing) return;
-    elementRef.current?.focus();
-    const selection = window.getSelection(),
-      range = document.createRange();
-    if (selection && elementRef.current) {
-      range.selectNodeContents(elementRef.current);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    }
-  }, [editing]);
-  return (
-    <Tag
-      ref={elementRef as never}
-      className={`${className} ${selected ? "canvas-node-selected" : ""} ${editing ? "text-editing" : ""}`}
-      data-layer-id={selectId}
-      data-layer-label={editing ? "텍스트 편집 중" : id}
-      contentEditable={editing}
-      suppressContentEditableWarning
-      onClick={(event) => onSelect(event, selectId)}
-      onDoubleClick={(event) => {
-        event.stopPropagation();
-        onEdit(id);
-      }}
-      onBlur={(event) => {
-        onUpdate(field, event.currentTarget.innerText);
-        onEdit("");
-      }}
-      onKeyDown={(event) => {
-        if (!multiline && event.key === "Enter") {
-          event.preventDefault();
-          event.currentTarget.blur();
-        }
-        if (event.key === "Escape") event.currentTarget.blur();
-      }}
-      style={{ ...style, whiteSpace: multiline ? "pre-line" : undefined }}
-    >
-      {value}
-    </Tag>
-  );
-}
 
 function flatten(items: Layer[]): Layer[] {
   return items.flatMap((item) => [
@@ -91,7 +17,25 @@ function flatten(items: Layer[]): Layer[] {
     ...(item.children ? flatten(item.children) : []),
   ]);
 }
-const zoomSteps = [60, 70, 80, 90, 100, 125, 150, 200, 300] as const;
+
+function ElementIcon({ layer }: { layer: Layer }) {
+  const registry = layer.iconType === "svg" ? svgIcons : muiIcons;
+  const IconComponent = registry[
+    layer.iconInstance as keyof typeof registry
+  ] as React.ComponentType<{ size?: number; color?: string }> | undefined;
+
+  return IconComponent ? (
+    <IconComponent
+      size={layer.iconSize ?? 22}
+      color={layer.iconColor ?? "currentColor"}
+    />
+  ) : (
+    <span style={{ color: layer.iconColor ?? "currentColor" }}>
+      <Icon name="icon" size={layer.iconSize ?? 22} />
+    </span>
+  );
+}
+const zoomSteps = Array.from({ length: 30 }, (_, index) => (index + 1) * 10);
 
 export function CanvasEditor({
   layers,
@@ -109,9 +53,7 @@ export function CanvasEditor({
   focusRequestKey,
   focusPageId,
   selected,
-  content,
   onSelect,
-  onUpdate,
 }: {
   layers: Layer[];
   sizes: Record<string, LayerSize>;
@@ -131,12 +73,9 @@ export function CanvasEditor({
   focusRequestKey: number;
   focusPageId: string;
   selected: string;
-  content: EditableContent;
   onSelect: (id: string) => void;
-  onUpdate: UpdateContent;
 }) {
-  const [device, setDevice] = useState<Device>("desktop"),
-    [editing, setEditing] = useState("");
+  const [device, setDevice] = useState<Device>("desktop");
   const [tool, setTool] = useState<"cursor" | "hand">("cursor"),
     [panning, setPanning] = useState(false);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -181,14 +120,14 @@ export function CanvasEditor({
   }, [commentPanel]);
   const select = (event: React.MouseEvent, id: string) => {
     event.stopPropagation();
-    if (tool === "cursor" && !editing) onSelect(id);
+    if (tool === "cursor") onSelect(id);
   };
   const openOrderMenu = (event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
     setOrderMenu({
       x: Math.max(8, Math.min(event.clientX, window.innerWidth - 194)),
-      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 154)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 350)),
       submenuSide:
         event.clientX + 178 + 230 + 16 > window.innerWidth ? "left" : "right",
     });
@@ -241,6 +180,10 @@ export function CanvasEditor({
     { kind: "image", label: "Image" },
     { kind: "clipboard", label: "Clipboard" },
     { kind: "button", label: "Button" },
+    { kind: "checkbox", label: "Checkbox" },
+    { kind: "radio", label: "Radio" },
+    { kind: "select", label: "Select" },
+    { kind: "icon", label: "Icon" },
   ];
   const pages = layers.filter(
     (item) => item.kind === "page" && item.visible !== false,
@@ -268,14 +211,6 @@ export function CanvasEditor({
       ),
     ),
   );
-  const activeIds = new Set(flatten(layers).map((item) => item.id));
-  const editableSelection: Record<string, string> = {
-    logo: "logo",
-    eyebrow: "eyebrow",
-    heading: "heading",
-    description: "description",
-    cta: "cta-text",
-  };
   const findLayer = (items: Layer[], id: string): Layer | undefined => {
     for (const item of items) {
       if (item.id === id) return item;
@@ -283,58 +218,6 @@ export function CanvasEditor({
       if (found) return found;
     }
   };
-  const renderCustomLayer = (layer: Layer): React.ReactNode => {
-    /* eslint-disable @typescript-eslint/no-unused-vars */
-    // @ts-expect-error Removed after the generic renderer below replaces this legacy declaration.
-    const container = layer.kind === "group" || layer.kind === "frame";
-    return (
-      <div
-        key={layer.id}
-        data-layer-id={layer.id}
-        style={{
-          ...styleFor(layer.id),
-          ...(layerImages[layer.id]
-            ? {
-                backgroundImage: `url(${layerImages[layer.id]})`,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }
-            : {}),
-        }}
-        className={`custom-canvas-layer ${layer.kind} ${selected === layer.id ? "canvas-node-selected" : ""}`}
-        data-layer-label={layer.name}
-        onClick={(event) => select(event, layer.id)}
-      >
-        {container ? (
-          selected === layer.id ? (
-            <span className="custom-container-label">{layer.name}</span>
-          ) : null
-        ) : (
-          <span className="custom-layer-content">
-            {layerImages[layer.id] ? null : layer.kind === "image" ||
-              layer.kind === "clipboard" ? (
-              <>
-                <Icon name={layer.kind} size={22} />
-                <small>
-                  {layer.kind === "clipboard" ? "Ctrl+V" : "이미지"}
-                </small>
-              </>
-            ) : layer.kind === "text" || layer.kind === "button" ? (
-              (layerText[layer.id] ?? layer.name)
-            ) : (
-              layer.name
-            )}
-          </span>
-        )}
-        {container && layer.children?.length ? (
-          <div className="custom-layer-children">
-            {layer.children.map(renderCustomLayer)}
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-  /* eslint-enable @typescript-eslint/no-unused-vars */
   const renderPaletteLayer = (layer: Layer): React.ReactNode => {
     if (layer.visible === false) return null;
     const container = layer.kind === "section" || layer.kind === "layer";
@@ -370,6 +253,37 @@ export function CanvasEditor({
                   {layer.kind === "clipboard" ? "Ctrl+V" : "이미지"}
                 </small>
               </>
+            ) : layer.kind === "checkbox" || layer.kind === "radio" ? (
+              <span
+                className={`canvas-option-list ${layer.optionOrientation ?? "horizontal"}`}
+              >
+                {Array.from(
+                  { length: Math.max(1, layer.optionCount ?? 1) },
+                  (_, index) => {
+                    const option = layer.optionItems?.[index] ?? {
+                      display: `${layer.optionLabel ?? "Option"} ${index + 1}`,
+                      value: "Option",
+                    };
+                    return (
+                      <label key={index} className="canvas-option-item">
+                        <input
+                          type={layer.kind}
+                          name={layer.kind === "radio" ? layer.id : undefined}
+                          value={option.value}
+                          onClick={(event) => event.preventDefault()}
+                        />
+                        <span>{option.display}</span>
+                      </label>
+                    );
+                  },
+                )}
+              </span>
+            ) : layer.kind === "select" ? (
+              <select aria-label={layer.name} defaultValue="option">
+                <option value="option">Option</option>
+              </select>
+            ) : layer.kind === "icon" ? (
+              <ElementIcon layer={layer} />
             ) : layer.kind === "text" || layer.kind === "button" ? (
               (layerText[layer.id] ?? layer.name)
             ) : (
@@ -416,9 +330,10 @@ export function CanvasEditor({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
       event.preventDefault();
       setZoom((current) => {
-        const index = zoomSteps.indexOf(current as (typeof zoomSteps)[number]);
+        const index = zoomSteps.indexOf(current);
         const nextIndex = Math.max(
           0,
           Math.min(zoomSteps.length - 1, index + (event.deltaY < 0 ? 1 : -1)),
@@ -460,7 +375,7 @@ export function CanvasEditor({
       width: rect.width / scale,
       height: rect.height / scale,
     });
-  }, [selected, sizes, positions, device, content, layers, zoom]);
+  }, [selected, sizes, positions, device, layers, zoom]);
 
   useEffect(() => {
     if (focusRequestKey === 0) return;
@@ -939,188 +854,8 @@ export function CanvasEditor({
                     select(event, page.id);
                 }}
               >
-                {activeIds.has("nav") && (
-                  <nav
-                    style={styleFor("nav")}
-                    data-layer-id="nav"
-                    className={`portfolio-nav ${selected === "nav" ? "canvas-node-selected" : ""}`}
-                    data-layer-label="Navigation"
-                    onClick={(event) => select(event, "nav")}
-                  >
-                    {activeIds.has("logo") && (
-                      <EditableText
-                        id="logo"
-                        field="logo"
-                        value={content.logo}
-                        selected={selected === "logo"}
-                        editing={editing === "logo"}
-                        onSelect={select}
-                        onEdit={setEditing}
-                        onUpdate={onUpdate}
-                        as="b"
-                        style={styleFor("logo")}
-                      />
-                    )}
-                    {activeIds.has("menu") && (
-                      <div
-                        style={styleFor("menu")}
-                        data-layer-id="menu"
-                        className={
-                          selected === "menu" ? "canvas-node-selected" : ""
-                        }
-                        data-layer-label="Menu Items"
-                        onClick={(event) => select(event, "menu")}
-                      >
-                        <EditableText
-                          id="menuAbout"
-                          selectId="menu"
-                          field="menuAbout"
-                          value={content.menuAbout}
-                          selected={false}
-                          editing={editing === "menuAbout"}
-                          onSelect={select}
-                          onEdit={setEditing}
-                          onUpdate={onUpdate}
-                        />
-                        <EditableText
-                          id="menuProjects"
-                          selectId="menu"
-                          field="menuProjects"
-                          value={content.menuProjects}
-                          selected={false}
-                          editing={editing === "menuProjects"}
-                          onSelect={select}
-                          onEdit={setEditing}
-                          onUpdate={onUpdate}
-                        />
-                        <EditableText
-                          id="menuContact"
-                          selectId="menu"
-                          field="menuContact"
-                          value={content.menuContact}
-                          selected={false}
-                          editing={editing === "menuContact"}
-                          onSelect={select}
-                          onEdit={setEditing}
-                          onUpdate={onUpdate}
-                        />
-                        {renderCustomChildren("menu")}
-                      </div>
-                    )}
-                    {renderCustomChildren("nav")}
-                  </nav>
-                )}
-                <div className="hero-grid">
-                  {activeIds.has("intro") && (
-                    <div
-                      style={styleFor("intro")}
-                      data-layer-id="intro"
-                      className={`hero-copy ${selected === "intro" ? "canvas-node-selected" : ""}`}
-                      data-layer-label="Intro Content"
-                      onClick={(event) => select(event, "intro")}
-                    >
-                      {activeIds.has("eyebrow") && (
-                        <EditableText
-                          id="eyebrow"
-                          field="eyebrow"
-                          value={content.eyebrow}
-                          selected={selected === "eyebrow"}
-                          editing={editing === "eyebrow"}
-                          className="role"
-                          onSelect={select}
-                          onEdit={setEditing}
-                          onUpdate={onUpdate}
-                          style={styleFor("eyebrow")}
-                        />
-                      )}{" "}
-                      {activeIds.has("heading") && (
-                        <EditableText
-                          id="heading"
-                          field="heading"
-                          value={content.heading}
-                          selected={selected === "heading"}
-                          editing={editing === "heading"}
-                          onSelect={select}
-                          onEdit={setEditing}
-                          onUpdate={onUpdate}
-                          multiline
-                          as="h1"
-                          style={styleFor("heading")}
-                        />
-                      )}{" "}
-                      {activeIds.has("description") && (
-                        <EditableText
-                          id="description"
-                          field="description"
-                          value={content.description}
-                          selected={selected === "description"}
-                          editing={editing === "description"}
-                          onSelect={select}
-                          onEdit={setEditing}
-                          onUpdate={onUpdate}
-                          multiline
-                          as="p"
-                          style={styleFor("description")}
-                        />
-                      )}{" "}
-                      {activeIds.has("cta") && (
-                        <button
-                          style={styleFor("cta")}
-                          data-layer-id="cta"
-                          className={
-                            selected === "cta" ? "canvas-node-selected" : ""
-                          }
-                          data-layer-label="CTA Button"
-                          onClick={(event) => select(event, "cta")}
-                        >
-                          <EditableText
-                            id="cta-text"
-                            selectId="cta"
-                            field="cta"
-                            value={content.cta}
-                            selected={false}
-                            editing={editing === "cta-text"}
-                            onSelect={select}
-                            onEdit={setEditing}
-                            onUpdate={onUpdate}
-                          />{" "}
-                          <span>→</span>
-                        </button>
-                      )}
-                    </div>
-                  )}{" "}
-                  {activeIds.has("portrait") && (
-                    <div
-                      style={{
-                        ...styleFor("portrait"),
-                        ...(layerImages.portrait
-                          ? {
-                              backgroundImage: `url(${layerImages.portrait})`,
-                              backgroundSize: "cover",
-                              backgroundPosition: "center",
-                            }
-                          : {}),
-                      }}
-                      data-layer-id="portrait"
-                      className={`portrait ${selected === "portrait" ? "canvas-node-selected" : ""}`}
-                      data-layer-label="Profile Image"
-                      onClick={(event) => select(event, "portrait")}
-                    >
-                      {!layerImages.portrait && (
-                        <div className="portrait-shape">
-                          <div className="person-head" />
-                          <div className="person-body" />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
                 <div className="custom-layer-stack">
                   {renderCustomChildren(page.id)}
-                </div>
-                <div className="scroll-hint">
-                  <span>테두리 드래그로 이동 · 꼭짓점 드래그로 크기 조절</span>
-                  <i />
                 </div>
               </div>
             ))}
@@ -1131,11 +866,6 @@ export function CanvasEditor({
                 onPointerDown={beginMove}
                 onContextMenu={openOrderMenu}
                 onClick={(event) => event.stopPropagation()}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  if (editableSelection[selected])
-                    setEditing(editableSelection[selected]);
-                }}
                 title="드래그하여 이동"
               >
                 {(["top", "right", "bottom", "left"] as const).map((edge) => (

@@ -66,6 +66,33 @@ export function Icon({ name, size = 16 }: { name: string; size?: number }) {
         <path d="M9 12h6" />
       </>
     ),
+    checkbox: (
+      <>
+        <rect x="4" y="4" width="16" height="16" rx="2" />
+        <path d="m8 12 3 3 5-6" />
+      </>
+    ),
+    radio: (
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <circle cx="12" cy="12" r="3" fill="currentColor" />
+      </>
+    ),
+    select: (
+      <>
+        <rect x="3" y="6" width="18" height="12" rx="2" />
+        <path d="m16 10 2 2-2 2" />
+      </>
+    ),
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 8v8M8 12h8" />
+      </>
+    ),
+    star: (
+      <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z" />
+    ),
     plus: <path d="M12 5v14M5 12h14" />,
     undo: (
       <>
