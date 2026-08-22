@@ -1,7 +1,23 @@
 import Link from "next/link";
 import { Icon } from "./icon";
 
-export function EditorHeader({ saved }: { saved: string }) {
+type EditorHeaderProps = {
+  saved: string;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  onPreview: () => void;
+};
+
+export function EditorHeader({
+  saved,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onPreview,
+}: EditorHeaderProps) {
   return (
     <header className="topbar">
       <div className="brand">
@@ -26,14 +42,28 @@ export function EditorHeader({ saved }: { saved: string }) {
         <small>{saved}</small>
       </div>
       <div className="header-actions">
-        <button className="icon-button">
+        <button
+          type="button"
+          className="icon-button"
+          title="실행 취소"
+          aria-label="실행 취소"
+          disabled={!canUndo}
+          onClick={onUndo}
+        >
           <Icon name="undo" />
         </button>
-        <button className="icon-button muted">
+        <button
+          type="button"
+          className="icon-button"
+          title="다시 실행"
+          aria-label="다시 실행"
+          disabled={!canRedo}
+          onClick={onRedo}
+        >
           <Icon name="redo" />
         </button>
         <span className="divider" />
-        <button className="plain-button">
+        <button type="button" className="plain-button" onClick={onPreview}>
           <Icon name="play" /> 미리보기
         </button>
         <button className="share-button">

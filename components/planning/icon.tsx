@@ -128,6 +128,18 @@ export function Icon({ name, size = 16 }: { name: string; size?: number }) {
     comment: (
       <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" />
     ),
+    history: (
+      <>
+        <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+        <path d="M3 3v5h5M12 7v5l3 2" />
+      </>
+    ),
+    note: (
+      <>
+        <path d="M5 3h14a2 2 0 0 1 2 2v11l-5 5H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+        <path d="M16 21v-5h5M7 8h10M7 12h7" />
+      </>
+    ),
     more: (
       <>
         <circle cx="5" cy="12" r="1" fill="currentColor" />

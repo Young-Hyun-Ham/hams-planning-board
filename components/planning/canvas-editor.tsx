@@ -18,6 +18,19 @@ function flatten(items: Layer[]): Layer[] {
   ]);
 }
 
+type CanvasMemo = {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  backgroundColor: string;
+  opacity: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
 function ElementIcon({ layer }: { layer: Layer }) {
   const registry = layer.iconType === "svg" ? svgIcons : muiIcons;
   const IconComponent = registry[
@@ -102,6 +115,8 @@ export function CanvasEditor({
   const [comments, setComments] = useState<
     { id: string; text: string; author: string; createdAt: string | null }[]
   >([]);
+  const [memos, setMemos] = useState<CanvasMemo[]>([]);
+  const [memoCreating, setMemoCreating] = useState(false);
   const artboardRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const suppressCanvasClickRef = useRef(false);
@@ -118,6 +133,29 @@ export function CanvasEditor({
     window.addEventListener("pointerdown", close, true);
     return () => window.removeEventListener("pointerdown", close, true);
   }, [commentPanel]);
+  useEffect(() => {
+    if (!projectId) return;
+    const controller = new AbortController();
+    fetch(`/api/projects/${encodeURIComponent(projectId)}/memos`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const result = (await response.json()) as {
+          memos?: CanvasMemo[];
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(result.error ?? "메모 목록을 불러오지 못했습니다.");
+        }
+        setMemos(result.memos ?? []);
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name !== "AbortError") {
+          window.alert(error.message);
+        }
+      });
+    return () => controller.abort();
+  }, [projectId]);
   const select = (event: React.MouseEvent, id: string) => {
     event.stopPropagation();
     if (tool === "cursor") onSelect(id);
@@ -205,6 +243,7 @@ export function CanvasEditor({
           (sizes[page.id]?.width ?? defaultPageWidth),
       ),
     ),
+    ...memos.map((memo) => Math.max(0, memo.x + memo.width)),
   );
   const workspaceHeight = Math.max(
     560,
@@ -214,6 +253,7 @@ export function CanvasEditor({
         pagePosition(page, index).y + (sizes[page.id]?.height ?? 560),
       ),
     ),
+    ...memos.map((memo) => Math.max(0, memo.y + memo.height)),
   );
   const findLayer = (items: Layer[], id: string): Layer | undefined => {
     for (const item of items) {
@@ -377,15 +417,34 @@ export function CanvasEditor({
       setBox(null);
       return;
     }
-    const boardRect = board.getBoundingClientRect(),
-      rect = node.getBoundingClientRect();
-    const scale = boardRect.width / board.offsetWidth || 1;
-    setBox({
-      left: (rect.left - boardRect.left) / scale,
-      top: (rect.top - boardRect.top) / scale,
-      width: rect.width / scale,
-      height: rect.height / scale,
-    });
+    const measure = () => {
+      const boardRect = board.getBoundingClientRect(),
+        rect = node.getBoundingClientRect();
+      const scale = boardRect.width / board.offsetWidth || 1;
+      const nextBox = {
+        left: (rect.left - boardRect.left) / scale,
+        top: (rect.top - boardRect.top) / scale,
+        width: rect.width / scale,
+        height: rect.height / scale,
+      };
+      setBox((current) =>
+        current &&
+        Math.abs(current.left - nextBox.left) < 0.01 &&
+        Math.abs(current.top - nextBox.top) < 0.01 &&
+        Math.abs(current.width - nextBox.width) < 0.01 &&
+        Math.abs(current.height - nextBox.height) < 0.01
+          ? current
+          : nextBox,
+      );
+    };
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(node);
+    node.addEventListener("transitionend", measure);
+    return () => {
+      resizeObserver.disconnect();
+      node.removeEventListener("transitionend", measure);
+    };
   }, [selected, sizes, positions, device, layers, zoom]);
 
   useEffect(() => {
@@ -589,6 +648,8 @@ export function CanvasEditor({
 
   const beginPan = (event: React.PointerEvent<HTMLDivElement>) => {
     if (tool !== "hand") return;
+    if (event.target instanceof Element && event.target.closest(".canvas-memo"))
+      return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     event.preventDefault();
@@ -676,6 +737,161 @@ export function CanvasEditor({
       );
     } finally {
       setCommentSaving(false);
+    }
+  };
+  const updateMemoLocal = (id: string, update: Partial<CanvasMemo>) => {
+    setMemos((current) =>
+      current.map((memo) => (memo.id === id ? { ...memo, ...update } : memo)),
+    );
+  };
+  const saveMemo = async (id: string, update: Partial<CanvasMemo>) => {
+    if (!projectId) return;
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/memos`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, ...update }),
+        },
+      );
+      const result = (await response.json()) as {
+        saved?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !result.saved) {
+        throw new Error(result.error ?? "메모를 저장하지 못했습니다.");
+      }
+    } catch (error) {
+      window.alert(
+        error instanceof Error ? error.message : "메모를 저장하지 못했습니다.",
+      );
+    }
+  };
+  const addMemo = async () => {
+    if (!projectId) {
+      window.alert("메모를 추가하려면 먼저 문서를 저장해주세요.");
+      return;
+    }
+    const containsSelected = (layer: Layer): boolean =>
+      layer.id === selected || Boolean(layer.children?.some(containsSelected));
+    const page = pages.find(containsSelected) ?? pages[0];
+    const pageIndex = page ? pages.indexOf(page) : 0;
+    const origin = page ? pagePosition(page, pageIndex) : { x: 0, y: 0 };
+    const offset = (memos.length % 6) * 18;
+    const draft = {
+      x: origin.x + 40 + offset,
+      y: origin.y + 40 + offset,
+      width: 220,
+      height: 160,
+    };
+    setMemoCreating(true);
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/memos`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(draft),
+        },
+      );
+      const result = (await response.json()) as {
+        memo?: CanvasMemo;
+        error?: string;
+      };
+      if (!response.ok || !result.memo) {
+        throw new Error(result.error ?? "메모를 추가하지 못했습니다.");
+      }
+      setMemos((current) => [...current, result.memo as CanvasMemo]);
+    } catch (error) {
+      window.alert(
+        error instanceof Error ? error.message : "메모를 추가하지 못했습니다.",
+      );
+    } finally {
+      setMemoCreating(false);
+    }
+  };
+  const beginMemoDrag = (
+    event: React.PointerEvent<HTMLElement>,
+    memo: CanvasMemo,
+  ) => {
+    if (
+      event.button !== 0 ||
+      (event.target instanceof Element &&
+        event.target.closest(".canvas-memo-controls"))
+    )
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    const scale = zoom / 100;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let nextX = memo.x;
+    let nextY = memo.y;
+    const move = (moveEvent: PointerEvent) => {
+      nextX = memo.x + (moveEvent.clientX - startX) / scale;
+      nextY = memo.y + (moveEvent.clientY - startY) / scale;
+      updateMemoLocal(memo.id, { x: nextX, y: nextY });
+    };
+    const end = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      void saveMemo(memo.id, { x: nextX, y: nextY });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+  };
+  const beginMemoResize = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    memo: CanvasMemo,
+  ) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const scale = zoom / 100;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let nextWidth = memo.width;
+    let nextHeight = memo.height;
+    const move = (moveEvent: PointerEvent) => {
+      nextWidth = Math.min(
+        600,
+        Math.max(140, memo.width + (moveEvent.clientX - startX) / scale),
+      );
+      nextHeight = Math.min(
+        600,
+        Math.max(100, memo.height + (moveEvent.clientY - startY) / scale),
+      );
+      updateMemoLocal(memo.id, { width: nextWidth, height: nextHeight });
+    };
+    const end = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      void saveMemo(memo.id, { width: nextWidth, height: nextHeight });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+  };
+  const deleteMemo = async (memo: CanvasMemo) => {
+    if (!projectId) return;
+    if (!window.confirm("이 메모를 삭제하시겠습니까?")) return;
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/memos?memoId=${encodeURIComponent(memo.id)}`,
+        { method: "DELETE" },
+      );
+      const result = (await response.json()) as {
+        deleted?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !result.deleted) {
+        throw new Error(result.error ?? "메모를 삭제하지 못했습니다.");
+      }
+      setMemos((current) => current.filter((item) => item.id !== memo.id));
+    } catch (error) {
+      window.alert(
+        error instanceof Error ? error.message : "메모를 삭제하지 못했습니다.",
+      );
     }
   };
 
@@ -778,6 +994,14 @@ export function CanvasEditor({
               </div>
             )}
           </div>
+          <button
+            onClick={() => void addMemo()}
+            disabled={memoCreating}
+            title="메모 추가"
+            aria-label="캔버스에 메모 추가"
+          >
+            <Icon name="note" />
+          </button>
         </div>
         <div className="device-switch">
           {(["desktop", "tablet", "mobile"] as const).map((item) => (
@@ -869,6 +1093,91 @@ export function CanvasEditor({
                   {renderCustomChildren(page.id)}
                 </div>
               </div>
+            ))}
+            {memos.map((memo, index) => (
+              <article
+                key={memo.id}
+                className="canvas-memo"
+                style={{
+                  left: memo.x,
+                  top: memo.y,
+                  width: memo.width,
+                  height: memo.height,
+                  backgroundColor: memo.backgroundColor,
+                  opacity: memo.opacity,
+                  zIndex: 10000 + index,
+                }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <header onPointerDown={(event) => beginMemoDrag(event, memo)}>
+                  <strong>메모</strong>
+                  <div className="canvas-memo-controls">
+                    <label title={`투명도 ${Math.round(memo.opacity * 100)}%`}>
+                      <span>투명도</span>
+                      <input
+                        type="range"
+                        min="20"
+                        max="100"
+                        value={Math.round(memo.opacity * 100)}
+                        onChange={(event) =>
+                          updateMemoLocal(memo.id, {
+                            opacity: Number(event.target.value) / 100,
+                          })
+                        }
+                        onPointerUp={(event) =>
+                          void saveMemo(memo.id, {
+                            opacity: Number(event.currentTarget.value) / 100,
+                          })
+                        }
+                        onBlur={(event) =>
+                          void saveMemo(memo.id, {
+                            opacity: Number(event.currentTarget.value) / 100,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="canvas-memo-color" title="메모 배경색">
+                      <span>배경색</span>
+                      <input
+                        type="color"
+                        value={memo.backgroundColor}
+                        onChange={(event) => {
+                          const backgroundColor = event.target.value;
+                          updateMemoLocal(memo.id, { backgroundColor });
+                          void saveMemo(memo.id, { backgroundColor });
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      title="메모 닫기 및 삭제"
+                      aria-label="메모 닫기 및 삭제"
+                      onClick={() => void deleteMemo(memo)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </header>
+                <textarea
+                  maxLength={4000}
+                  value={memo.text}
+                  onChange={(event) =>
+                    updateMemoLocal(memo.id, { text: event.target.value })
+                  }
+                  onBlur={(event) =>
+                    void saveMemo(memo.id, { text: event.target.value })
+                  }
+                  placeholder="메모를 입력하세요"
+                  aria-label="메모 내용"
+                />
+                <button
+                  type="button"
+                  className="canvas-memo-resize"
+                  title="메모 크기 조절"
+                  aria-label="메모 크기 조절"
+                  onPointerDown={(event) => beginMemoResize(event, memo)}
+                />
+              </article>
             ))}
             {box && (
               <div

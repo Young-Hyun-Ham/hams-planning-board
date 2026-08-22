@@ -2,13 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icon";
 import type { Layer } from "./types";
 
+type AiPromptChat = {
+  id: string;
+  prompt: string;
+  model: string;
+  screenTitle: string;
+  createdAt: string | null;
+};
+type SelectionMode = "single" | "toggle" | "range";
+
 type RowProps = {
   layer: Layer;
   depth?: number;
   selectedIds: string[];
   draggedIds: string[];
   dropTargetId: string | null;
-  onSelect: (id: string, additive?: boolean) => void;
+  onSelect: (id: string, event: React.MouseEvent) => void;
   onDragStart: (event: React.DragEvent, id: string) => void;
   onDragEnd: () => void;
   onDragOver: (event: React.DragEvent, layer: Layer) => void;
@@ -65,7 +74,8 @@ function LayerRow({
         style={{ paddingLeft: 10 + depth * 18 }}
         draggable={!renaming && layer.kind !== "page"}
         aria-selected={selectedIds.includes(layer.id)}
-        onClick={(event) => onSelect(layer.id, event.shiftKey)}
+        data-layer-row-id={layer.id}
+        onClick={(event) => onSelect(layer.id, event)}
         onContextMenu={(event) => onContextMenu(event, layer)}
         onDragStart={(event) => onDragStart(event, layer.id)}
         onDragEnd={onDragEnd}
@@ -171,7 +181,8 @@ type Props = {
   onRenameTitle: (name: string) => void;
   layers: Layer[];
   selectedIds: string[];
-  onSelect: (id: string, additive?: boolean) => void;
+  selectionAnchor: string;
+  onSelect: (id: string, mode?: SelectionMode, rangeIds?: string[]) => void;
   onMoveToParent: (ids: string[], parentId: string) => void;
   onRename: (id: string, name: string) => void;
   onAdd: (
@@ -195,6 +206,8 @@ type Props = {
   onModelChange: (value: string) => void;
   modelsLoading: boolean;
   modelWarning: string;
+  projectId?: string;
+  aiHistoryVersion: number;
   onGenerate: () => void;
   generating: boolean;
 };
@@ -204,6 +217,7 @@ export function LeftPanel({
   onRenameTitle,
   layers,
   selectedIds,
+  selectionAnchor,
   onSelect,
   onMoveToParent,
   onRename,
@@ -224,6 +238,8 @@ export function LeftPanel({
   onModelChange,
   modelsLoading,
   modelWarning,
+  projectId,
+  aiHistoryVersion,
   onGenerate,
   generating,
 }: Props) {
@@ -235,6 +251,10 @@ export function LeftPanel({
     [pageMenu, setPageMenu] = useState(false);
   const [draggedIds, setDraggedIds] = useState<string[]>([]);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [aiHistory, setAiHistory] = useState<AiPromptChat[]>([]);
+  const [aiHistoryLoading, setAiHistoryLoading] = useState(true);
+  const [aiHistoryError, setAiHistoryError] = useState("");
   const [tab, setTab] = useState<"layers" | "pages">("layers"),
     [projects, setProjects] = useState<
       { id: string; title: string; status: string; updatedAt: string | null }[]
@@ -253,6 +273,19 @@ export function LeftPanel({
       window.removeEventListener("blur", close);
     };
   }, []);
+  useEffect(() => {
+    if (!historyOpen) return;
+    const closeHistory = (event: PointerEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".ai-history-panel, .ai-history-button")
+      )
+        return;
+      setHistoryOpen(false);
+    };
+    window.addEventListener("pointerdown", closeHistory);
+    return () => window.removeEventListener("pointerdown", closeHistory);
+  }, [historyOpen]);
   useEffect(() => {
     if (tab !== "layers") return;
     const button = document.querySelector<HTMLButtonElement>(
@@ -336,6 +369,37 @@ export function LeftPanel({
       });
     return () => controller.abort();
   }, [tab]);
+  useEffect(() => {
+    if (!historyOpen) return;
+    if (!projectId) return;
+
+    const controller = new AbortController();
+    fetch(`/api/projects/${encodeURIComponent(projectId)}/ai-prompt-chats`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const result = (await response.json()) as {
+          chats?: AiPromptChat[];
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(
+            result.error ?? "AI 프롬프트 내역을 불러오지 못했습니다.",
+          );
+        }
+        setAiHistoryError("");
+        setAiHistory(result.chats ?? []);
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name !== "AbortError") {
+          setAiHistoryError(error.message);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAiHistoryLoading(false);
+      });
+    return () => controller.abort();
+  }, [historyOpen, projectId, aiHistoryVersion]);
   const additions: { kind: Layer["kind"]; label: string }[] = [
     { kind: "layer", label: "Layer" },
     { kind: "section", label: "Section" },
@@ -381,6 +445,25 @@ export function LeftPanel({
       const draggedLayer = findInTree(layers, id);
       return draggedLayer ? containsLayer(draggedLayer, layer.id) : false;
     });
+  const selectTreeLayer = (id: string, event: React.MouseEvent) => {
+    if (event.shiftKey) {
+      const visibleIds = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".left-panel .layer-tree [data-layer-row-id]",
+        ),
+        (row) => row.dataset.layerRowId,
+      ).filter((rowId): rowId is string => Boolean(rowId));
+      const anchorIndex = visibleIds.indexOf(selectionAnchor);
+      const selectedIndex = visibleIds.indexOf(id);
+      if (anchorIndex >= 0 && selectedIndex >= 0) {
+        const start = Math.min(anchorIndex, selectedIndex);
+        const end = Math.max(anchorIndex, selectedIndex);
+        onSelect(id, "range", visibleIds.slice(start, end + 1));
+        return;
+      }
+    }
+    onSelect(id, event.ctrlKey || event.metaKey ? "toggle" : "single");
+  };
   const startDrag = (event: React.DragEvent, id: string) => {
     const ids = selectedIds.includes(id)
       ? selectedIds.filter(
@@ -526,7 +609,7 @@ export function LeftPanel({
             selectedIds={selectedIds}
             draggedIds={draggedIds}
             dropTargetId={dropTargetId}
-            onSelect={onSelect}
+            onSelect={selectTreeLayer}
             onDragStart={startDrag}
             onDragEnd={endDrag}
             onDragOver={dragOver}
@@ -600,7 +683,55 @@ export function LeftPanel({
             <Icon name="sparkle" size={16} />
           </span>
           <strong>AI로 화면 만들기</strong>
+          <button
+            type="button"
+            className="ai-history-button"
+            title="AI 프롬프트 기록"
+            aria-label="AI 프롬프트 기록 보기"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((current) => !current)}
+          >
+            <Icon name="history" size={15} />
+          </button>
         </div>
+        {historyOpen && (
+          <div
+            className="ai-history-panel"
+            role="dialog"
+            aria-label="AI 프롬프트 기록"
+          >
+            <div className="ai-history-head">
+              <strong>프롬프트 기록</strong>
+              <span>{aiHistory.length}</span>
+            </div>
+            <div className="ai-history-list">
+              {projectId && aiHistoryLoading ? (
+                <div className="ai-history-state">불러오는 중...</div>
+              ) : aiHistoryError ? (
+                <div className="ai-history-state error">{aiHistoryError}</div>
+              ) : aiHistory.length === 0 ? (
+                <div className="ai-history-state">
+                  아직 생성 내역이 없습니다.
+                </div>
+              ) : (
+                aiHistory.map((chat) => (
+                  <article className="ai-history-item" key={chat.id}>
+                    <p>{chat.prompt}</p>
+                    <div>
+                      <span>{chat.screenTitle || "AI 화면"}</span>
+                      <span>{chat.model}</span>
+                    </div>
+                    <time dateTime={chat.createdAt ?? undefined}>
+                      {chat.createdAt
+                        ? new Date(chat.createdAt).toLocaleString("ko-KR")
+                        : "방금 전"}
+                    </time>
+                  </article>
+                ))
+              )}
+            </div>
+          </div>
+        )}
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}

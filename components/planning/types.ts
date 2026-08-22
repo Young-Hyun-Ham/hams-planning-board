@@ -57,9 +57,22 @@ export type LayerStyle = {
   effect?: LayerEffect;
 };
 
+export type PreviewDocument = {
+  title: string;
+  activePageId: string;
+  layers: Layer[];
+  sizes: Record<string, LayerSize>;
+  positions: Record<string, LayerPosition>;
+  layerText: Record<string, string>;
+  layerImages: Record<string, string>;
+  layerStyles: Record<string, LayerStyle>;
+};
+
 export type GeneratedElement = {
+  id: string;
+  parentId: string;
   name: string;
-  kind: "section" | "layer" | "text" | "image" | "button" | "icon";
+  kind: Exclude<ElementKind, "page">;
   text: string;
   x: number;
   y: number;
@@ -78,15 +91,31 @@ export type GeneratedElement = {
   effect: LayerEffect;
   iconInstance: string;
   iconSize: number;
+  iconType: IconType;
+  iconColor: string;
+  optionLabel: string;
+  optionCount: number;
+  optionOrientation: OptionOrientation;
+  optionItems: LayerOption[];
+  visible: boolean;
+  locked: boolean;
 };
 
-export type GeneratedScreen = {
-  title: string;
-  page: {
-    name: string;
-    width: number;
-    height: number;
-    backgroundColor: string;
-  };
+export type GeneratedPage = {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  backgroundColor: string;
+  visible: boolean;
+  locked: boolean;
   elements: GeneratedElement[];
+};
+
+export type GeneratedDocument = {
+  title: string;
+  activePageId: string;
+  pages: GeneratedPage[];
 };

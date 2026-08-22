@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasEditor } from "@/components/planning/canvas-editor";
 import { EditorHeader } from "@/components/planning/editor-header";
 import {
@@ -11,16 +11,222 @@ import {
 import { LeftPanel } from "@/components/planning/left-panel";
 import { RightPanel } from "@/components/planning/right-panel";
 import type {
-  GeneratedScreen,
+  GeneratedDocument,
+  GeneratedElement,
   Layer,
   LayerPosition,
   LayerSize,
   LayerStyle,
+  PreviewDocument,
 } from "@/components/planning/types";
+
+const defaultLayerSize = (kind: Layer["kind"]): LayerSize =>
+  kind === "page"
+    ? { width: 860, height: 560 }
+    : kind === "section" || kind === "layer"
+      ? { width: 150, height: 100 }
+      : kind === "text" || kind === "button" || kind === "select"
+        ? { width: 110, height: 32 }
+        : kind === "checkbox" || kind === "radio"
+          ? { width: 140, height: 32 }
+          : kind === "icon"
+            ? { width: 32, height: 32 }
+            : { width: 110, height: 80 };
+
+type EditorSnapshot = {
+  title: string;
+  layers: Layer[];
+  sizes: Record<string, LayerSize>;
+  positions: Record<string, LayerPosition>;
+  layerText: Record<string, string>;
+  layerImages: Record<string, string>;
+  layerStyles: Record<string, LayerStyle>;
+};
+
+const cloneEditorSnapshot = (snapshot: EditorSnapshot): EditorSnapshot =>
+  structuredClone(snapshot);
+
+const isSameEditorSnapshot = (left: EditorSnapshot, right: EditorSnapshot) =>
+  left.title === right.title &&
+  left.layers === right.layers &&
+  left.sizes === right.sizes &&
+  left.positions === right.positions &&
+  left.layerText === right.layerText &&
+  left.layerImages === right.layerImages &&
+  left.layerStyles === right.layerStyles;
+
+function findPageId(
+  items: Layer[],
+  id: string,
+  pageId = "",
+): string | undefined {
+  for (const item of items) {
+    const currentPageId = item.kind === "page" ? item.id : pageId;
+    if (item.id === id) return currentPageId;
+    const found = item.children && findPageId(item.children, id, currentPageId);
+    if (found) return found;
+  }
+}
+
+function createAiDocument(
+  title: string,
+  layers: Layer[],
+  sizes: Record<string, LayerSize>,
+  positions: Record<string, LayerPosition>,
+  layerText: Record<string, string>,
+  layerStyles: Record<string, LayerStyle>,
+  selected: string,
+): GeneratedDocument {
+  const pages = layers
+    .filter((layer) => layer.kind === "page")
+    .map((page, pageIndex) => {
+      const pageSize = sizes[page.id] ?? defaultLayerSize("page");
+      const elements: GeneratedElement[] = [];
+      const appendElements = (items: Layer[], parentId: string) => {
+        items.forEach((layer) => {
+          if (layer.kind === "page" || layer.template) return;
+          const size = sizes[layer.id] ?? defaultLayerSize(layer.kind);
+          const position = positions[layer.id] ?? { x: 0, y: 0 };
+          const style = layerStyles[layer.id] ?? {};
+          elements.push({
+            id: layer.id,
+            parentId,
+            name: layer.name,
+            kind: layer.kind,
+            text: layerText[layer.id] ?? layer.name,
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+            fontSize: style.fontSize ?? 14,
+            lineHeight: style.lineHeight ?? 1.4,
+            fontWeight: style.fontWeight ?? 400,
+            color: style.color ?? "#18181b",
+            backgroundColor: style.backgroundColor ?? "transparent",
+            borderColor: style.borderColor ?? "transparent",
+            borderWidth: style.borderWidth ?? 0,
+            opacity: style.opacity ?? 1,
+            borderRadius: style.borderRadius ?? 0,
+            textAlign: style.textAlign ?? "left",
+            effect: style.effect ?? "none",
+            iconInstance: layer.iconInstance ?? "",
+            iconSize: layer.iconSize ?? 22,
+            iconType: layer.iconType ?? "",
+            iconColor: layer.iconColor ?? style.color ?? "#18181b",
+            optionLabel: layer.optionLabel ?? "Option",
+            optionCount: Math.max(1, layer.optionCount ?? 1),
+            optionOrientation: layer.optionOrientation ?? "horizontal",
+            optionItems: layer.optionItems ?? [],
+            visible: layer.visible !== false,
+            locked: layer.locked === true,
+          });
+          if (layer.children) appendElements(layer.children, layer.id);
+        });
+      };
+      appendElements(page.children ?? [], page.id);
+      return {
+        id: page.id,
+        name: page.name,
+        x: positions[page.id]?.x ?? pageIndex * 940,
+        y: positions[page.id]?.y ?? 0,
+        width: pageSize.width,
+        height: pageSize.height,
+        backgroundColor: layerStyles[page.id]?.backgroundColor ?? "#f7f4ef",
+        visible: page.visible !== false,
+        locked: page.locked === true,
+        elements,
+      };
+    });
+  return {
+    title,
+    activePageId: findPageId(layers, selected) ?? pages[0]?.id ?? "page",
+    pages,
+  };
+}
+
+function createEditorState(
+  document: GeneratedDocument,
+  currentImages: Record<string, string>,
+) {
+  const sizes: Record<string, LayerSize> = {};
+  const positions: Record<string, LayerPosition> = {};
+  const text: Record<string, string> = {};
+  const styles: Record<string, LayerStyle> = {};
+  const images: Record<string, string> = {};
+  const layers: Layer[] = document.pages.map((page) => {
+    sizes[page.id] = { width: page.width, height: page.height };
+    positions[page.id] = { x: page.x, y: page.y };
+    styles[page.id] = { backgroundColor: page.backgroundColor };
+    const byId = new Map<string, Layer>();
+    page.elements.forEach((element) => {
+      const container = element.kind === "section" || element.kind === "layer";
+      byId.set(element.id, {
+        id: element.id,
+        name: element.name,
+        kind: element.kind,
+        iconType: element.iconType,
+        iconInstance: element.iconInstance,
+        iconSize: element.iconSize,
+        iconColor: element.iconColor,
+        optionLabel: element.optionLabel,
+        optionCount: element.optionCount,
+        optionOrientation: element.optionOrientation,
+        optionItems: element.optionItems,
+        visible: element.visible,
+        locked: element.locked,
+        children: container ? [] : undefined,
+      });
+      sizes[element.id] = { width: element.width, height: element.height };
+      positions[element.id] = { x: element.x, y: element.y };
+      styles[element.id] = {
+        fontSize: element.fontSize,
+        lineHeight: element.lineHeight,
+        fontWeight: element.fontWeight,
+        color: element.color,
+        backgroundColor: element.backgroundColor,
+        borderColor: element.borderColor,
+        borderWidth: element.borderWidth,
+        opacity: element.opacity,
+        borderRadius: element.borderRadius,
+        textAlign: element.textAlign,
+        effect: element.effect,
+      };
+      if (element.kind === "text" || element.kind === "button") {
+        text[element.id] = element.text;
+      }
+      if (
+        (element.kind === "image" || element.kind === "clipboard") &&
+        currentImages[element.id]
+      )
+        images[element.id] = currentImages[element.id];
+    });
+    const children: Layer[] = [];
+    page.elements.forEach((element) => {
+      const layer = byId.get(element.id);
+      if (!layer) return;
+      const parent = byId.get(element.parentId);
+      if (parent && (parent.kind === "section" || parent.kind === "layer")) {
+        parent.children?.push(layer);
+      } else {
+        children.push(layer);
+      }
+    });
+    return {
+      id: page.id,
+      name: page.name,
+      kind: "page",
+      visible: page.visible,
+      locked: page.locked,
+      children,
+    };
+  });
+  return { layers, sizes, positions, text, styles, images };
+}
 
 export default function Home() {
   const [selected, setSelected] = useState("page");
   const [selectedIds, setSelectedIds] = useState<string[]>(["page"]);
+  const [selectionAnchor, setSelectionAnchor] = useState("page");
   const [layers, setLayers] = useState<Layer[]>(initialLayers);
   const [sizes, setSizes] = useState<Record<string, LayerSize>>({});
   const [positions, setPositions] = useState<Record<string, LayerPosition>>({});
@@ -34,6 +240,7 @@ export default function Home() {
   const [model, setModel] = useState("");
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelWarning, setModelWarning] = useState("");
+  const [aiHistoryVersion, setAiHistoryVersion] = useState(0);
   const [errorSnackbar, setErrorSnackbar] = useState<{
     id: number;
     message: string;
@@ -45,6 +252,31 @@ export default function Home() {
   const [saved, setSaved] = useState("저장됨");
   const [focusRequestKey, setFocusRequestKey] = useState(0);
   const [focusPageId, setFocusPageId] = useState("page");
+  const currentEditorSnapshot = useMemo<EditorSnapshot>(
+    () => ({
+      title: documentTitle,
+      layers,
+      sizes,
+      positions,
+      layerText,
+      layerImages,
+      layerStyles,
+    }),
+    [
+      documentTitle,
+      layers,
+      sizes,
+      positions,
+      layerText,
+      layerImages,
+      layerStyles,
+    ],
+  );
+  const undoHistory = useRef<EditorSnapshot[]>([]);
+  const redoHistory = useRef<EditorSnapshot[]>([]);
+  const activeSnapshot = useRef(currentEditorSnapshot);
+  const historyGroupTimer = useRef<number | null>(null);
+  const [historyStatus, setHistoryStatus] = useState({ undo: 0, redo: 0 });
   const selectedName = useMemo(
     () => findLayerName(selected, layers),
     [selected, layers],
@@ -53,19 +285,136 @@ export default function Home() {
     () => findLayerById(selected, layers),
     [selected, layers],
   );
-  const selectLayer = (id: string, additive = false) => {
-    const nextSelectedIds = additive
-      ? selectedIds.includes(id)
-        ? selectedIds.length > 1
-          ? selectedIds.filter((selectedId) => selectedId !== id)
-          : selectedIds
-        : [...selectedIds, id]
-      : [id];
+  const clearHistoryGroupTimer = () => {
+    if (historyGroupTimer.current === null) return;
+    window.clearTimeout(historyGroupTimer.current);
+    historyGroupTimer.current = null;
+  };
+  const refreshHistoryControls = () => {
+    setHistoryStatus({
+      undo: undoHistory.current.length,
+      redo: redoHistory.current.length,
+    });
+  };
+  const applyEditorSnapshot = (snapshot: EditorSnapshot) => {
+    activeSnapshot.current = snapshot;
+    setDocumentTitle(snapshot.title);
+    setLayers(snapshot.layers);
+    setSizes(snapshot.sizes);
+    setPositions(snapshot.positions);
+    setLayerText(snapshot.layerText);
+    setLayerImages(snapshot.layerImages);
+    setLayerStyles(snapshot.layerStyles);
+
+    const nextSelected = findLayerById(selected, snapshot.layers)
+      ? selected
+      : (snapshot.layers.find((layer) => layer.kind === "page")?.id ?? "page");
+    setSelected(nextSelected);
+    setSelectedIds([nextSelected]);
+    setSelectionAnchor(nextSelected);
+  };
+  const resetDocumentHistory = (snapshot: EditorSnapshot) => {
+    clearHistoryGroupTimer();
+    undoHistory.current = [];
+    redoHistory.current = [];
+    activeSnapshot.current = snapshot;
+    refreshHistoryControls();
+  };
+  const undo = () => {
+    clearHistoryGroupTimer();
+    const snapshot = undoHistory.current.pop();
+    if (!snapshot) return;
+    redoHistory.current.push(cloneEditorSnapshot(activeSnapshot.current));
+    if (redoHistory.current.length > 40) redoHistory.current.shift();
+    applyEditorSnapshot(snapshot);
+    setSaved("실행 취소됨");
+    refreshHistoryControls();
+  };
+  const redo = () => {
+    clearHistoryGroupTimer();
+    const snapshot = redoHistory.current.pop();
+    if (!snapshot) return;
+    undoHistory.current.push(cloneEditorSnapshot(activeSnapshot.current));
+    if (undoHistory.current.length > 40) undoHistory.current.shift();
+    applyEditorSnapshot(snapshot);
+    setSaved("다시 실행됨");
+    refreshHistoryControls();
+  };
+  const openPreview = () => {
+    const activePageId =
+      findPageId(layers, selected) ??
+      layers.find((layer) => layer.kind === "page")?.id ??
+      "page";
+    const previewDocument: PreviewDocument = {
+      title: documentTitle,
+      activePageId,
+      layers,
+      sizes,
+      positions,
+      layerText,
+      layerImages,
+      layerStyles,
+    };
+    const previewWindow = window.open("/preview", "_blank");
+    if (!previewWindow) {
+      setErrorSnackbar({
+        id: Date.now(),
+        message:
+          "미리보기 창을 열 수 없습니다. 브라우저의 팝업 차단을 해제해 주세요.",
+      });
+      return;
+    }
+
+    const sendPreview = () => {
+      if (previewWindow.closed) return;
+      previewWindow.postMessage(
+        { type: "plancraft:preview-document", document: previewDocument },
+        window.location.origin,
+      );
+    };
+    const retryTimers = [250, 750, 1500].map((delay) =>
+      window.setTimeout(sendPreview, delay),
+    );
+    const cleanup = () => {
+      window.removeEventListener("message", receiveReady);
+      retryTimers.forEach((timer) => window.clearTimeout(timer));
+      window.clearTimeout(cleanupTimer);
+    };
+    const receiveReady = (event: MessageEvent) => {
+      if (
+        event.origin !== window.location.origin ||
+        event.source !== previewWindow ||
+        event.data?.type !== "plancraft:preview-ready"
+      )
+        return;
+      sendPreview();
+      cleanup();
+    };
+    window.addEventListener("message", receiveReady);
+    const cleanupTimer = window.setTimeout(cleanup, 5000);
+    sendPreview();
+  };
+  const selectLayer = (
+    id: string,
+    mode: "single" | "toggle" | "range" = "single",
+    rangeIds: string[] = [],
+  ) => {
+    const nextSelectedIds =
+      mode === "range" && rangeIds.length
+        ? rangeIds
+        : mode === "toggle"
+          ? selectedIds.includes(id)
+            ? selectedIds.length > 1
+              ? selectedIds.filter((selectedId) => selectedId !== id)
+              : selectedIds
+            : [...selectedIds, id]
+          : [id];
     const primaryId = nextSelectedIds.includes(id)
       ? id
       : (nextSelectedIds.at(-1) ?? id);
     setSelectedIds(nextSelectedIds);
     setSelected(primaryId);
+    if (mode !== "range") setSelectionAnchor(id);
     if (findLayerById(primaryId, layers)?.kind === "page") {
       setFocusPageId(primaryId);
       setFocusRequestKey((current) => current + 1);
@@ -77,6 +426,28 @@ export default function Home() {
     const timeout = window.setTimeout(() => setErrorSnackbar(null), 8_000);
     return () => window.clearTimeout(timeout);
   }, [errorSnackbar]);
+
+  useEffect(() => {
+    const previous = activeSnapshot.current;
+    if (isSameEditorSnapshot(previous, currentEditorSnapshot)) return;
+
+    if (historyGroupTimer.current === null) {
+      undoHistory.current.push(cloneEditorSnapshot(previous));
+      if (undoHistory.current.length > 40) undoHistory.current.shift();
+      redoHistory.current = [];
+    } else {
+      window.clearTimeout(historyGroupTimer.current);
+    }
+    activeSnapshot.current = currentEditorSnapshot;
+    historyGroupTimer.current = window.setTimeout(() => {
+      historyGroupTimer.current = null;
+    }, 350);
+    refreshHistoryControls();
+  }, [currentEditorSnapshot]);
+
+  useEffect(() => () => {
+    clearHistoryGroupTimer();
+  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -209,6 +580,7 @@ export default function Home() {
     setPositions((current) => ({ ...current, [id]: { x: 0, y: 0 } }));
     setSelected(id);
     setSelectedIds([id]);
+    setSelectionAnchor(id);
   };
   const moveLayersToParent = (ids: string[], parentId: string) => {
     const movableIds = ids.filter(
@@ -329,6 +701,7 @@ export default function Home() {
     setPositions((current) => ({ ...current, ...movedPositions }));
     setSelectedIds(topLevelIds);
     setSelected(topLevelIds.at(-1) ?? parentId);
+    setSelectionAnchor(topLevelIds.at(-1) ?? parentId);
     if (target.kind === "page") {
       setFocusPageId(target.id);
       setFocusRequestKey((current) => current + 1);
@@ -417,6 +790,7 @@ export default function Home() {
     });
     setSelected(remainingPages[0]?.id ?? "page");
     setSelectedIds([remainingPages[0]?.id ?? "page"]);
+    setSelectionAnchor(remainingPages[0]?.id ?? "page");
   };
   const updateLayerState = (id: string, update: (layer: Layer) => Layer) => {
     const change = (items: Layer[]): Layer[] =>
@@ -459,6 +833,7 @@ export default function Home() {
     }));
     setSelected(id);
     setSelectedIds([id]);
+    setSelectionAnchor(id);
     setFocusPageId(id);
     setFocusRequestKey((current) => current + 1);
     setSaved("새 페이지 추가됨");
@@ -533,136 +908,175 @@ export default function Home() {
     const project = result.project;
     if (!Array.isArray(project.layers))
       throw new Error("저장된 레이어 데이터가 올바르지 않습니다.");
-    setLayers(project.layers as Layer[]);
-    setSizes(
+    const nextLayers = project.layers as Layer[];
+    const nextSizes =
       project.sizes && typeof project.sizes === "object"
         ? (project.sizes as Record<string, LayerSize>)
-        : {},
-    );
-    setPositions(
+        : {};
+    const nextPositions =
       project.positions && typeof project.positions === "object"
         ? (project.positions as Record<string, LayerPosition>)
-        : {},
-    );
-    setLayerText(
+        : {};
+    const nextLayerText =
       project.layerText && typeof project.layerText === "object"
         ? (project.layerText as Record<string, string>)
-        : {},
-    );
-    setLayerImages(
+        : {};
+    const nextLayerImages =
       project.layerImages && typeof project.layerImages === "object"
         ? (project.layerImages as Record<string, string>)
-        : {},
-    );
-    setLayerStyles(
+        : {};
+    const nextLayerStyles =
       project.layerStyles && typeof project.layerStyles === "object"
         ? (project.layerStyles as Record<string, LayerStyle>)
-        : {},
-    );
+        : {};
+    const nextTitle =
+      typeof project.title === "string" ? project.title : "Page";
+    resetDocumentHistory({
+      title: nextTitle,
+      layers: nextLayers,
+      sizes: nextSizes,
+      positions: nextPositions,
+      layerText: nextLayerText,
+      layerImages: nextLayerImages,
+      layerStyles: nextLayerStyles,
+    });
+    setLayers(nextLayers);
+    setSizes(nextSizes);
+    setPositions(nextPositions);
+    setLayerText(nextLayerText);
+    setLayerImages(nextLayerImages);
+    setLayerStyles(nextLayerStyles);
     setPrompt(typeof project.prompt === "string" ? project.prompt : "");
-    setDocumentTitle(
-      typeof project.title === "string" ? project.title : "Page",
-    );
+    setDocumentTitle(nextTitle);
     setSelected(
       typeof project.selected === "string" ? project.selected : "page",
     );
     setSelectedIds([
       typeof project.selected === "string" ? project.selected : "page",
     ]);
+    setSelectionAnchor(
+      typeof project.selected === "string" ? project.selected : "page",
+    );
     setProjectId(project.id);
     setSaved("Firebase에서 불러옴");
   };
 
   const generate = async () => {
-    if (!prompt.trim() || !model) return;
+    const requestPrompt = prompt.trim();
+    const requestedModel = model;
+    if (!requestPrompt || !requestedModel) return;
     setGenerating(true);
     setErrorSnackbar(null);
     setSaved(`${model}이 화면을 설계하는 중...`);
     try {
+      const currentDocument = createAiDocument(
+        documentTitle,
+        layers,
+        sizes,
+        positions,
+        layerText,
+        layerStyles,
+        selected,
+      );
       const response = await fetch("/api/generate-screen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, model }),
+        body: JSON.stringify({
+          prompt: requestPrompt,
+          model: requestedModel,
+          currentDocument,
+        }),
       });
       const result = (await response.json()) as {
-        screen?: GeneratedScreen;
+        document?: GeneratedDocument;
         model?: string;
         error?: string;
       };
-      if (!response.ok || !result.screen) {
+      if (!response.ok || !result.document) {
         throw new Error(result.error ?? "AI 화면을 생성하지 못했습니다.");
       }
 
-      const screen = result.screen;
-      const generationId = Date.now();
-      const pageId = `ai-page-${generationId}`;
-      const generatedLayers: Layer[] = screen.elements.map(
-        (element, index) => ({
-          id: `ai-${generationId}-${index + 1}`,
-          name: element.name,
-          kind: element.kind,
-          ...(element.kind === "icon"
-            ? {
-                iconType: "mui" as const,
-                iconInstance: element.iconInstance,
-                iconSize: element.iconSize,
-                iconColor: element.color,
-              }
-            : {}),
-        }),
-      );
-      const nextSizes: Record<string, LayerSize> = {
-        [pageId]: { width: screen.page.width, height: screen.page.height },
-      };
-      const nextPositions: Record<string, LayerPosition> = {
-        [pageId]: { x: 0, y: 0 },
-      };
-      const nextText: Record<string, string> = {};
-      const nextStyles: Record<string, LayerStyle> = {
-        [pageId]: { backgroundColor: screen.page.backgroundColor },
-      };
+      const nextDocument = result.document;
+      const nextState = createEditorState(nextDocument, layerImages);
+      const nextLayers = nextState.layers;
+      const nextSizes = nextState.sizes;
+      const nextPositions = nextState.positions;
+      const nextText = nextState.text;
+      const nextStyles = nextState.styles;
+      const nextImages = nextState.images;
+      const pageId =
+        nextLayers.find((page) => page.id === nextDocument.activePageId)?.id ??
+        nextLayers.at(-1)?.id ??
+        "page";
 
-      screen.elements.forEach((element, index) => {
-        const id = `ai-${generationId}-${index + 1}`;
-        nextSizes[id] = { width: element.width, height: element.height };
-        nextPositions[id] = { x: element.x, y: element.y };
-        nextStyles[id] = {
-          fontSize: element.fontSize,
-          lineHeight: element.lineHeight,
-          fontWeight: element.fontWeight,
-          color: element.color,
-          backgroundColor: element.backgroundColor,
-          borderColor: element.borderColor,
-          borderWidth: element.borderWidth,
-          opacity: element.opacity,
-          borderRadius: element.borderRadius,
-          textAlign: element.textAlign,
-          effect: element.effect,
-        };
-        if (element.kind === "text" || element.kind === "button") {
-          nextText[id] = element.text || element.name;
-        }
-      });
-
-      setLayers([
-        {
-          id: pageId,
-          name: screen.page.name,
-          kind: "page",
-          children: generatedLayers,
-        },
-      ]);
+      setLayers(nextLayers);
       setSizes(nextSizes);
       setPositions(nextPositions);
       setLayerText(nextText);
-      setLayerImages({});
+      setLayerImages(nextImages);
       setLayerStyles(nextStyles);
-      setDocumentTitle(screen.title);
+      setDocumentTitle(nextDocument.title);
       setSelected(pageId);
       setSelectedIds([pageId]);
+      setSelectionAnchor(pageId);
       setFocusPageId(pageId);
       setFocusRequestKey((current) => current + 1);
-      setSaved(`${result.model ?? model} 화면 생성됨 · 저장 필요`);
+      const saveResponse = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save",
+          projectId,
+          title: nextDocument.title,
+          prompt: "",
+          layers: nextLayers,
+          sizes: nextSizes,
+          positions: nextPositions,
+          layerText: nextText,
+          layerImages: nextImages,
+          layerStyles: nextStyles,
+          selected: pageId,
+        }),
+      });
+      const saveResult = (await saveResponse.json()) as {
+        id?: string;
+        error?: string;
+      };
+      if (!saveResponse.ok || !saveResult.id) {
+        throw new Error(
+          saveResult.error ?? "AI가 수정한 문서를 저장하지 못했습니다.",
+        );
+      }
+      const historyProjectId = saveResult.id;
+      setProjectId(saveResult.id);
+
+      const historyResponse = await fetch(
+        `/api/projects/${encodeURIComponent(historyProjectId)}/ai-prompt-chats`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: requestPrompt,
+            model: result.model ?? requestedModel,
+            screenTitle: nextDocument.title,
+          }),
+        },
+      );
+      const historyResult = (await historyResponse.json()) as {
+        saved?: boolean;
+        error?: string;
+      };
+      if (!historyResponse.ok || !historyResult.saved) {
+        throw new Error(
+          historyResult.error ?? "AI 프롬프트 내역을 저장하지 못했습니다.",
+        );
+      }
+
+      setPrompt("");
+      setAiHistoryVersion((current) => current + 1);
+      setSaved(
+        `${result.model ?? requestedModel} 화면 생성됨 · 프롬프트 기록 저장됨`,
+      );
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "AI 화면 생성에 실패했습니다.";
@@ -675,7 +1089,14 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <EditorHeader saved={saved} />
+      <EditorHeader
+        saved={saved}
+        canUndo={historyStatus.undo > 0}
+        canRedo={historyStatus.redo > 0}
+        onUndo={undo}
+        onRedo={redo}
+        onPreview={openPreview}
+      />
       <section className="workspace">
         <LeftPanel
           title={documentTitle}
@@ -685,6 +1106,7 @@ export default function Home() {
           }}
           layers={layers}
           selectedIds={selectedIds}
+          selectionAnchor={selectionAnchor}
           onSelect={selectLayer}
           onMoveToParent={moveLayersToParent}
           onRename={renameLayer}
@@ -708,6 +1130,8 @@ export default function Home() {
           onModelChange={setModel}
           modelsLoading={modelsLoading}
           modelWarning={modelWarning}
+          projectId={projectId}
+          aiHistoryVersion={aiHistoryVersion}
           onGenerate={generate}
           generating={generating}
         />
