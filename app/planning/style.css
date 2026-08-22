@@ -1364,7 +1364,7 @@
 .layer-tree {
   flex: 1;
   min-height: 0;
-  margin-bottom: 205px;
+  margin-bottom: 240px;
   padding: 7px 0;
   overflow: auto;
 }
@@ -1385,6 +1385,17 @@
 .layer-row.selected {
   background: #eeeaff;
   color: #5a37e8;
+}
+.layer-row[draggable="true"] {
+  cursor: grab;
+}
+.layer-row.dragging {
+  opacity: 0.45;
+}
+.layer-row.drop-target {
+  background: #e0f2fe;
+  box-shadow: inset 3px 0 #0284c7;
+  color: #0369a1;
 }
 .layer-toggle {
   width: 12px;

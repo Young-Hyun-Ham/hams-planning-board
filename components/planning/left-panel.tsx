@@ -5,8 +5,14 @@ import type { Layer } from "./types";
 type RowProps = {
   layer: Layer;
   depth?: number;
-  selected: string;
-  onSelect: (id: string) => void;
+  selectedIds: string[];
+  draggedIds: string[];
+  dropTargetId: string | null;
+  onSelect: (id: string, additive?: boolean) => void;
+  onDragStart: (event: React.DragEvent, id: string) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: React.DragEvent, layer: Layer) => void;
+  onDrop: (event: React.DragEvent, layer: Layer) => void;
   onRename: (id: string, name: string) => void;
   onContextMenu: (event: React.MouseEvent, layer: Layer) => void;
   onToggleVisibility: (id: string) => void;
@@ -22,8 +28,14 @@ const layerIcon = (layer: Layer) =>
 function LayerRow({
   layer,
   depth = 0,
-  selected,
+  selectedIds,
+  draggedIds,
+  dropTargetId,
   onSelect,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
   onRename,
   onContextMenu,
   onToggleVisibility,
@@ -49,10 +61,25 @@ function LayerRow({
   return (
     <>
       <div
-        className={`layer-row ${selected === layer.id ? "selected" : ""} ${layer.visible === false ? "hidden-layer" : ""}`}
+        className={`layer-row ${selectedIds.includes(layer.id) ? "selected" : ""} ${draggedIds.includes(layer.id) ? "dragging" : ""} ${dropTargetId === layer.id ? "drop-target" : ""} ${layer.visible === false ? "hidden-layer" : ""}`}
         style={{ paddingLeft: 10 + depth * 18 }}
-        onClick={() => onSelect(layer.id)}
+        draggable={!renaming && layer.kind !== "page"}
+        aria-selected={selectedIds.includes(layer.id)}
+        onClick={(event) => onSelect(layer.id, event.shiftKey)}
         onContextMenu={(event) => onContextMenu(event, layer)}
+        onDragStart={(event) => onDragStart(event, layer.id)}
+        onDragEnd={onDragEnd}
+        onDragOver={(event) => {
+          if (
+            layer.kind === "page" ||
+            layer.kind === "section" ||
+            layer.kind === "layer"
+          ) {
+            setOpen(true);
+          }
+          onDragOver(event, layer);
+        }}
+        onDrop={(event) => onDrop(event, layer)}
       >
         <span
           className="layer-toggle"
@@ -121,8 +148,14 @@ function LayerRow({
             key={child.id}
             layer={child}
             depth={depth + 1}
-            selected={selected}
+            selectedIds={selectedIds}
+            draggedIds={draggedIds}
+            dropTargetId={dropTargetId}
             onSelect={onSelect}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
             onRename={onRename}
             onContextMenu={onContextMenu}
             onToggleVisibility={onToggleVisibility}
@@ -137,8 +170,9 @@ type Props = {
   title: string;
   onRenameTitle: (name: string) => void;
   layers: Layer[];
-  selected: string;
-  onSelect: (id: string) => void;
+  selectedIds: string[];
+  onSelect: (id: string, additive?: boolean) => void;
+  onMoveToParent: (ids: string[], parentId: string) => void;
   onRename: (id: string, name: string) => void;
   onAdd: (
     parentId: string,
@@ -169,8 +203,9 @@ export function LeftPanel({
   title,
   onRenameTitle,
   layers,
-  selected,
+  selectedIds,
   onSelect,
+  onMoveToParent,
   onRename,
   onAdd,
   onDelete,
@@ -198,6 +233,8 @@ export function LeftPanel({
       layer: Layer;
     } | null>(null),
     [pageMenu, setPageMenu] = useState(false);
+  const [draggedIds, setDraggedIds] = useState<string[]>([]);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [tab, setTab] = useState<"layers" | "pages">("layers"),
     [projects, setProjects] = useState<
       { id: string; title: string; status: string; updatedAt: string | null }[]
@@ -326,6 +363,54 @@ export function LeftPanel({
       layer,
     });
   };
+  const findInTree = (items: Layer[], id: string): Layer | undefined => {
+    for (const item of items) {
+      if (item.id === id) return item;
+      const found = item.children && findInTree(item.children, id);
+      if (found) return found;
+    }
+  };
+  const containsLayer = (layer: Layer, id: string): boolean =>
+    layer.id === id ||
+    Boolean(layer.children?.some((child) => containsLayer(child, id)));
+  const canReceiveDrop = (layer: Layer) =>
+    (layer.kind === "page" ||
+      layer.kind === "section" ||
+      layer.kind === "layer") &&
+    !draggedIds.some((id) => {
+      const draggedLayer = findInTree(layers, id);
+      return draggedLayer ? containsLayer(draggedLayer, layer.id) : false;
+    });
+  const startDrag = (event: React.DragEvent, id: string) => {
+    const ids = selectedIds.includes(id)
+      ? selectedIds.filter(
+          (selectedId) => findInTree(layers, selectedId)?.kind !== "page",
+        )
+      : [id];
+    if (!selectedIds.includes(id)) onSelect(id);
+    setDraggedIds(ids);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", ids.join(","));
+  };
+  const endDrag = () => {
+    setDraggedIds([]);
+    setDropTargetId(null);
+  };
+  const dragOver = (event: React.DragEvent, layer: Layer) => {
+    if (!draggedIds.length || !canReceiveDrop(layer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setDropTargetId(layer.id);
+  };
+  const drop = (event: React.DragEvent, layer: Layer) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (draggedIds.length && canReceiveDrop(layer)) {
+      onMoveToParent(draggedIds, layer.id);
+    }
+    endDrag();
+  };
   if (tab === "pages")
     return (
       <aside className="left-panel">
@@ -438,8 +523,14 @@ export function LeftPanel({
           <LayerRow
             key={layer.id}
             layer={layer}
-            selected={selected}
+            selectedIds={selectedIds}
+            draggedIds={draggedIds}
+            dropTargetId={dropTargetId}
             onSelect={onSelect}
+            onDragStart={startDrag}
+            onDragEnd={endDrag}
+            onDragOver={dragOver}
+            onDrop={drop}
             onRename={onRename}
             onContextMenu={openMenu}
             onToggleVisibility={onToggleVisibility}

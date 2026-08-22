@@ -20,6 +20,7 @@ import type {
 
 export default function Home() {
   const [selected, setSelected] = useState("page");
+  const [selectedIds, setSelectedIds] = useState<string[]>(["page"]);
   const [layers, setLayers] = useState<Layer[]>(initialLayers);
   const [sizes, setSizes] = useState<Record<string, LayerSize>>({});
   const [positions, setPositions] = useState<Record<string, LayerPosition>>({});
@@ -52,10 +53,21 @@ export default function Home() {
     () => findLayerById(selected, layers),
     [selected, layers],
   );
-  const selectLayer = (id: string) => {
-    setSelected(id);
-    if (findLayerById(id, layers)?.kind === "page") {
-      setFocusPageId(id);
+  const selectLayer = (id: string, additive = false) => {
+    const nextSelectedIds = additive
+      ? selectedIds.includes(id)
+        ? selectedIds.length > 1
+          ? selectedIds.filter((selectedId) => selectedId !== id)
+          : selectedIds
+        : [...selectedIds, id]
+      : [id];
+    const primaryId = nextSelectedIds.includes(id)
+      ? id
+      : (nextSelectedIds.at(-1) ?? id);
+    setSelectedIds(nextSelectedIds);
+    setSelected(primaryId);
+    if (findLayerById(primaryId, layers)?.kind === "page") {
+      setFocusPageId(primaryId);
       setFocusRequestKey((current) => current + 1);
     }
   };
@@ -160,7 +172,23 @@ export default function Home() {
         (item.kind === "page" ||
           item.kind === "section" ||
           item.kind === "layer")
-          ? { ...item, children: [...(item.children ?? []), layer] }
+          ? {
+              ...item,
+              children:
+                kind === "section" || kind === "layer"
+                  ? [
+                      ...(item.children ?? []).filter(
+                        (child) =>
+                          child.kind === "section" || child.kind === "layer",
+                      ),
+                      layer,
+                      ...(item.children ?? []).filter(
+                        (child) =>
+                          child.kind !== "section" && child.kind !== "layer",
+                      ),
+                    ]
+                  : [...(item.children ?? []), layer],
+            }
           : {
               ...item,
               children: item.children ? insertChild(item.children) : undefined,
@@ -180,6 +208,132 @@ export default function Home() {
     setSizes((current) => ({ ...current, [id]: defaultSize }));
     setPositions((current) => ({ ...current, [id]: { x: 0, y: 0 } }));
     setSelected(id);
+    setSelectedIds([id]);
+  };
+  const moveLayersToParent = (ids: string[], parentId: string) => {
+    const movableIds = ids.filter(
+      (id) => findLayerById(id, layers)?.kind !== "page",
+    );
+    const target = findLayerById(parentId, layers);
+    if (
+      !movableIds.length ||
+      !target ||
+      !["page", "layer", "section"].includes(target.kind)
+    )
+      return;
+
+    const containsId = (layer: Layer, id: string): boolean =>
+      layer.id === id ||
+      Boolean(layer.children?.some((child) => containsId(child, id)));
+    const topLevelIds = movableIds.filter((id) => {
+      return !movableIds.some((otherId) => {
+        if (otherId === id) return false;
+        const other = findLayerById(otherId, layers);
+        return other ? containsId(other, id) : false;
+      });
+    });
+    if (
+      topLevelIds.includes(parentId) ||
+      topLevelIds.some((id) => {
+        const layer = findLayerById(id, layers);
+        return layer ? containsId(layer, parentId) : false;
+      })
+    )
+      return;
+
+    const pageRelativePositions = new Map<string, LayerPosition>();
+    const collectRelativePositions = (
+      items: Layer[],
+      parentPosition: LayerPosition,
+    ) => {
+      items.forEach((item) => {
+        const localPosition = positions[item.id] ?? { x: 0, y: 0 };
+        const relativePosition =
+          item.kind === "page"
+            ? { x: 0, y: 0 }
+            : {
+                x: parentPosition.x + localPosition.x,
+                y: parentPosition.y + localPosition.y,
+              };
+        pageRelativePositions.set(item.id, relativePosition);
+        if (item.children) {
+          collectRelativePositions(item.children, relativePosition);
+        }
+      });
+    };
+    collectRelativePositions(layers, { x: 0, y: 0 });
+    const targetPosition = pageRelativePositions.get(parentId) ?? {
+      x: 0,
+      y: 0,
+    };
+    const movedPositions = Object.fromEntries(
+      topLevelIds.map((id) => {
+        const currentPosition = pageRelativePositions.get(id) ?? { x: 0, y: 0 };
+        return [
+          id,
+          {
+            x: currentPosition.x - targetPosition.x,
+            y: currentPosition.y - targetPosition.y,
+          },
+        ];
+      }),
+    ) as Record<string, LayerPosition>;
+
+    const moved: Layer[] = [];
+    const removeMoved = (items: Layer[]): Layer[] =>
+      items.flatMap((item) => {
+        if (topLevelIds.includes(item.id)) {
+          moved.push(item);
+          return [];
+        }
+        return [
+          {
+            ...item,
+            children: item.children ? removeMoved(item.children) : undefined,
+          },
+        ];
+      });
+    const insertMoved = (items: Layer[]): Layer[] =>
+      items.map((item) => {
+        if (item.id === parentId) {
+          const currentChildren = item.children ?? [];
+          const movedContainers = moved.filter(
+            (child) => child.kind === "section" || child.kind === "layer",
+          );
+          const movedElements = moved.filter(
+            (child) => child.kind !== "section" && child.kind !== "layer",
+          );
+          const firstElementIndex = currentChildren.findIndex(
+            (child) => child.kind !== "section" && child.kind !== "layer",
+          );
+          const containerInsertIndex =
+            firstElementIndex < 0 ? currentChildren.length : firstElementIndex;
+          return {
+            ...item,
+            children: [
+              ...currentChildren.slice(0, containerInsertIndex),
+              ...movedContainers,
+              ...currentChildren.slice(containerInsertIndex),
+              ...movedElements,
+            ],
+          };
+        }
+        return {
+          ...item,
+          children: item.children ? insertMoved(item.children) : undefined,
+        };
+      });
+
+    const withoutMoved = removeMoved(layers);
+    setLayers(insertMoved(withoutMoved));
+    setPositions((current) => ({ ...current, ...movedPositions }));
+    setSelectedIds(topLevelIds);
+    setSelected(topLevelIds.at(-1) ?? parentId);
+    if (target.kind === "page") {
+      setFocusPageId(target.id);
+      setFocusRequestKey((current) => current + 1);
+    }
+    setSaved("레이어 위치 변경됨");
   };
   const deleteFromTree = (items: Layer[], id: string): Layer[] =>
     items
@@ -262,6 +416,7 @@ export default function Home() {
       return next;
     });
     setSelected(remainingPages[0]?.id ?? "page");
+    setSelectedIds([remainingPages[0]?.id ?? "page"]);
   };
   const updateLayerState = (id: string, update: (layer: Layer) => Layer) => {
     const change = (items: Layer[]): Layer[] =>
@@ -303,6 +458,7 @@ export default function Home() {
       [id]: { x: pageCount * 940, y: 0 },
     }));
     setSelected(id);
+    setSelectedIds([id]);
     setFocusPageId(id);
     setFocusRequestKey((current) => current + 1);
     setSaved("새 페이지 추가됨");
@@ -410,6 +566,9 @@ export default function Home() {
     setSelected(
       typeof project.selected === "string" ? project.selected : "page",
     );
+    setSelectedIds([
+      typeof project.selected === "string" ? project.selected : "page",
+    ]);
     setProjectId(project.id);
     setSaved("Firebase에서 불러옴");
   };
@@ -500,6 +659,7 @@ export default function Home() {
       setLayerStyles(nextStyles);
       setDocumentTitle(screen.title);
       setSelected(pageId);
+      setSelectedIds([pageId]);
       setFocusPageId(pageId);
       setFocusRequestKey((current) => current + 1);
       setSaved(`${result.model ?? model} 화면 생성됨 · 저장 필요`);
@@ -524,8 +684,9 @@ export default function Home() {
             setSaved("문서 제목 수정됨");
           }}
           layers={layers}
-          selected={selected}
+          selectedIds={selectedIds}
           onSelect={selectLayer}
+          onMoveToParent={moveLayersToParent}
           onRename={renameLayer}
           onAdd={addLayer}
           onDelete={deleteLayer}
