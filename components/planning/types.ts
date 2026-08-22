@@ -49,7 +49,44 @@ export type LayerStyle = {
   fontWeight?: number;
   color?: string;
   backgroundColor?: string;
+  borderColor?: string;
+  borderWidth?: number;
   opacity?: number;
   borderRadius?: number;
+  textAlign?: "left" | "center" | "right";
   effect?: LayerEffect;
+};
+
+export type GeneratedElement = {
+  name: string;
+  kind: "section" | "layer" | "text" | "image" | "button" | "icon";
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  lineHeight: number;
+  fontWeight: number;
+  color: string;
+  backgroundColor: string;
+  borderColor: string;
+  borderWidth: number;
+  opacity: number;
+  borderRadius: number;
+  textAlign: "left" | "center" | "right";
+  effect: LayerEffect;
+  iconInstance: string;
+  iconSize: number;
+};
+
+export type GeneratedScreen = {
+  title: string;
+  page: {
+    name: string;
+    width: number;
+    height: number;
+    backgroundColor: string;
+  };
+  elements: GeneratedElement[];
 };

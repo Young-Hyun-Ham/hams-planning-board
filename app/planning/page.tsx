@@ -11,6 +11,7 @@ import {
 import { LeftPanel } from "@/components/planning/left-panel";
 import { RightPanel } from "@/components/planning/right-panel";
 import type {
+  GeneratedScreen,
   Layer,
   LayerPosition,
   LayerSize,
@@ -28,6 +29,14 @@ export default function Home() {
     {},
   );
   const [prompt, setPrompt] = useState("");
+  const [models, setModels] = useState<string[]>([]);
+  const [model, setModel] = useState("");
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelWarning, setModelWarning] = useState("");
+  const [errorSnackbar, setErrorSnackbar] = useState<{
+    id: number;
+    message: string;
+  } | null>(null);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [projectId, setProjectId] = useState<string>();
@@ -50,6 +59,43 @@ export default function Home() {
       setFocusRequestKey((current) => current + 1);
     }
   };
+
+  useEffect(() => {
+    if (!errorSnackbar) return;
+    const timeout = window.setTimeout(() => setErrorSnackbar(null), 8_000);
+    return () => window.clearTimeout(timeout);
+  }, [errorSnackbar]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/generate-screen", { signal: controller.signal })
+      .then(async (response) => {
+        const result = (await response.json()) as {
+          models?: string[];
+          defaultModel?: string;
+          warning?: string;
+        };
+        if (!response.ok || !result.models?.length) {
+          throw new Error("OpenAI 모델 목록을 불러오지 못했습니다.");
+        }
+        setModels(result.models);
+        setModel((current) =>
+          current && result.models?.includes(current)
+            ? current
+            : (result.defaultModel ?? result.models?.[0] ?? ""),
+        );
+        setModelWarning(result.warning ?? "");
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name !== "AbortError") {
+          setModelWarning(error.message);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setModelsLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
@@ -369,19 +415,99 @@ export default function Home() {
   };
 
   const generate = async () => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || !model) return;
     setGenerating(true);
-    setSaved("생성 중...");
+    setErrorSnackbar(null);
+    setSaved(`${model}이 화면을 설계하는 중...`);
     try {
-      const response = await fetch("/api/projects", {
+      const response = await fetch("/api/generate-screen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, title: "개인 포트폴리오 웹사이트" }),
+        body: JSON.stringify({ prompt, model }),
       });
-      const result = (await response.json()) as { saved?: boolean };
-      setSaved(result.saved ? "Firebase에 저장됨" : "데모 모드 · 로컬 생성");
-    } catch {
-      setSaved("로컬 생성됨");
+      const result = (await response.json()) as {
+        screen?: GeneratedScreen;
+        model?: string;
+        error?: string;
+      };
+      if (!response.ok || !result.screen) {
+        throw new Error(result.error ?? "AI 화면을 생성하지 못했습니다.");
+      }
+
+      const screen = result.screen;
+      const generationId = Date.now();
+      const pageId = `ai-page-${generationId}`;
+      const generatedLayers: Layer[] = screen.elements.map(
+        (element, index) => ({
+          id: `ai-${generationId}-${index + 1}`,
+          name: element.name,
+          kind: element.kind,
+          ...(element.kind === "icon"
+            ? {
+                iconType: "mui" as const,
+                iconInstance: element.iconInstance,
+                iconSize: element.iconSize,
+                iconColor: element.color,
+              }
+            : {}),
+        }),
+      );
+      const nextSizes: Record<string, LayerSize> = {
+        [pageId]: { width: screen.page.width, height: screen.page.height },
+      };
+      const nextPositions: Record<string, LayerPosition> = {
+        [pageId]: { x: 0, y: 0 },
+      };
+      const nextText: Record<string, string> = {};
+      const nextStyles: Record<string, LayerStyle> = {
+        [pageId]: { backgroundColor: screen.page.backgroundColor },
+      };
+
+      screen.elements.forEach((element, index) => {
+        const id = `ai-${generationId}-${index + 1}`;
+        nextSizes[id] = { width: element.width, height: element.height };
+        nextPositions[id] = { x: element.x, y: element.y };
+        nextStyles[id] = {
+          fontSize: element.fontSize,
+          lineHeight: element.lineHeight,
+          fontWeight: element.fontWeight,
+          color: element.color,
+          backgroundColor: element.backgroundColor,
+          borderColor: element.borderColor,
+          borderWidth: element.borderWidth,
+          opacity: element.opacity,
+          borderRadius: element.borderRadius,
+          textAlign: element.textAlign,
+          effect: element.effect,
+        };
+        if (element.kind === "text" || element.kind === "button") {
+          nextText[id] = element.text || element.name;
+        }
+      });
+
+      setLayers([
+        {
+          id: pageId,
+          name: screen.page.name,
+          kind: "page",
+          children: generatedLayers,
+        },
+      ]);
+      setSizes(nextSizes);
+      setPositions(nextPositions);
+      setLayerText(nextText);
+      setLayerImages({});
+      setLayerStyles(nextStyles);
+      setDocumentTitle(screen.title);
+      setSelected(pageId);
+      setFocusPageId(pageId);
+      setFocusRequestKey((current) => current + 1);
+      setSaved(`${result.model ?? model} 화면 생성됨 · 저장 필요`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "AI 화면 생성에 실패했습니다.";
+      setSaved(message);
+      setErrorSnackbar({ id: Date.now(), message });
     } finally {
       setGenerating(false);
     }
@@ -416,6 +542,11 @@ export default function Home() {
           saving={saving}
           prompt={prompt}
           onPromptChange={setPrompt}
+          models={models}
+          model={model}
+          onModelChange={setModel}
+          modelsLoading={modelsLoading}
+          modelWarning={modelWarning}
           onGenerate={generate}
           generating={generating}
         />
@@ -490,6 +621,29 @@ export default function Home() {
           }}
         />
       </section>
+      {errorSnackbar && (
+        <div
+          key={errorSnackbar.id}
+          className="error-snackbar"
+          role="alert"
+          aria-live="assertive"
+        >
+          <span className="error-snackbar-icon" aria-hidden>
+            !
+          </span>
+          <div className="error-snackbar-content">
+            <strong>오류가 발생했습니다</strong>
+            <p>{errorSnackbar.message}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="오류 메시지 닫기"
+            onClick={() => setErrorSnackbar(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
     </main>
   );
 }

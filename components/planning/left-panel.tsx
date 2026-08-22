@@ -156,6 +156,11 @@ type Props = {
   saving: boolean;
   prompt: string;
   onPromptChange: (value: string) => void;
+  models: string[];
+  model: string;
+  onModelChange: (value: string) => void;
+  modelsLoading: boolean;
+  modelWarning: string;
   onGenerate: () => void;
   generating: boolean;
 };
@@ -179,6 +184,11 @@ export function LeftPanel({
   saving,
   prompt,
   onPromptChange,
+  models,
+  model,
+  onModelChange,
+  modelsLoading,
+  modelWarning,
   onGenerate,
   generating,
 }: Props) {
@@ -503,13 +513,45 @@ export function LeftPanel({
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+              event.preventDefault();
+              onGenerate();
+            }
+          }}
           placeholder="예: 미니멀한 개인 홈페이지를 기획해줘"
+          maxLength={2000}
+          disabled={generating}
         />
-        <button onClick={onGenerate} disabled={generating}>
+        <label className="ai-model-field">
+          <span>사용 모델</span>
+          <select
+            value={model}
+            onChange={(event) => onModelChange(event.target.value)}
+            disabled={generating || modelsLoading || models.length === 0}
+          >
+            {modelsLoading && models.length === 0 ? (
+              <option value="">모델 불러오는 중...</option>
+            ) : (
+              models.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+        <button
+          onClick={onGenerate}
+          disabled={generating || !prompt.trim() || !model}
+          aria-busy={generating}
+        >
           {generating ? "화면 설계 중..." : "생성하기"}
-          <span>→</span>
+          <span>Ctrl/⌘ ↵</span>
         </button>
-        <p>AI가 화면 구조와 콘텐츠를 자동으로 설계합니다.</p>
+        <p className={modelWarning ? "ai-model-warning" : undefined}>
+          {modelWarning || "AI가 화면 구조와 콘텐츠를 자동으로 설계합니다."}
+        </p>
       </div>
     </aside>
   );

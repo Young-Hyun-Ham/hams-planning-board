@@ -163,8 +163,12 @@ export function CanvasEditor({
       fontWeight: layerStyle.fontWeight,
       color: layerStyle.color,
       backgroundColor: layerStyle.backgroundColor,
+      borderColor: layerStyle.borderColor,
+      borderStyle: layerStyle.borderWidth !== undefined ? "solid" : undefined,
+      borderWidth: layerStyle.borderWidth,
       opacity: layerStyle.opacity,
       borderRadius: layerStyle.borderRadius,
+      textAlign: layerStyle.textAlign,
       ...effectStyle,
     };
   };
@@ -244,7 +248,14 @@ export function CanvasEditor({
             <span className="custom-container-label">{layer.name}</span>
           ) : null
         ) : (
-          <span className="custom-layer-content">
+          <span
+            className="custom-layer-content"
+            style={
+              layer.kind === "text" || layer.kind === "button"
+                ? { width: "100%", textAlign: layerStyles[layer.id]?.textAlign }
+                : undefined
+            }
+          >
             {layerImages[layer.id] ? null : layer.kind === "image" ||
               layer.kind === "clipboard" ? (
               <>

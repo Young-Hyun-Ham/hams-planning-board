@@ -1,11 +1,24 @@
+import Link from "next/link";
 import { Icon } from "./icon";
 
 export function EditorHeader({ saved }: { saved: string }) {
   return (
     <header className="topbar">
       <div className="brand">
-        <div className="brand-mark">P</div>
-        <strong>PlanCraft</strong>
+        <Link
+          href="/"
+          aria-label="PlanCraft 홈으로 이동"
+          style={{
+            color: "inherit",
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+            textDecoration: "none",
+          }}
+        >
+          <div className="brand-mark">P</div>
+          <strong>PlanCraft</strong>
+        </Link>
         <span className="beta">BETA</span>
       </div>
       <div className="doc-title">

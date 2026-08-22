@@ -7,10 +7,6 @@ export const metadata: Metadata = {
     "아이디어를 편집 가능한 화면 설계서와 퍼블리싱 코드로 변환합니다.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
-  return (
-    <html lang="ko" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">{children}</body>
-    </html>
-  );
+export default function PlanningLayout({ children }: LayoutProps<"/planning">) {
+  return <div className="planning-root">{children}</div>;
 }

@@ -1,1 +1,8 @@
 @import "tailwindcss";
+
+:root {
+  --ink: #18181b;
+  --muted: #71717a;
+  --line: #e7e7e9;
+  --purple: #6d4aff;
+}

@@ -228,6 +228,7 @@ export function captureCanvasSource(): CanvasSource {
     const cssText = element.style.cssText.trim();
     if (!cssText) {
       element.removeAttribute("class");
+      element.removeAttribute("style");
       return;
     }
     let className = styleClasses.get(cssText);
