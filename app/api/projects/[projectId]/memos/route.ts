@@ -1,5 +1,10 @@
 import { FieldValue } from "firebase-admin/firestore";
+import {
+  getSsoUserFromRequest,
+  unauthorizedSsoResponse,
+} from "@hams-fam/sso-client";
 import { getAdminDb } from "@/lib/firebase-admin";
+import { authorizeProject } from "@/lib/project-access";
 
 const validId = (value: string) => /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const clamp = (value: number, minimum: number, maximum: number) =>
@@ -8,9 +13,12 @@ const validColor = (value: unknown): value is string =>
   typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value);
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
+  const user = getSsoUserFromRequest(request);
+  if (!user) return unauthorizedSsoResponse();
+
   try {
     const { projectId } = await params;
     if (!validId(projectId)) {
@@ -26,17 +34,9 @@ export async function GET(
         { status: 503 },
       );
     }
-    const project = await db
-      .collection("planningProjects")
-      .doc(projectId)
-      .get();
-    if (!project.exists) {
-      return Response.json(
-        { error: "기획 문서를 찾을 수 없습니다." },
-        { status: 404 },
-      );
-    }
-    const snapshot = await project.ref
+    const authorization = await authorizeProject(db, projectId, user, "view");
+    if (!authorization.ok) return authorization.response;
+    const snapshot = await authorization.reference
       .collection("memos")
       .orderBy("createdAt", "asc")
       .limit(200)
@@ -73,6 +73,9 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
+  const user = getSsoUserFromRequest(request);
+  if (!user) return unauthorizedSsoResponse();
+
   try {
     const { projectId } = await params;
     if (!validId(projectId)) {
@@ -94,14 +97,9 @@ export async function POST(
         { status: 503 },
       );
     }
-    const project = db.collection("planningProjects").doc(projectId);
-    if (!(await project.get()).exists) {
-      return Response.json(
-        { error: "기획 문서를 찾을 수 없습니다." },
-        { status: 404 },
-      );
-    }
-    const memo = await project.collection("memos").add({
+    const authorization = await authorizeProject(db, projectId, user, "edit");
+    if (!authorization.ok) return authorization.response;
+    const memo = await authorization.reference.collection("memos").add({
       text: "",
       x: clamp(typeof body.x === "number" ? body.x : 40, -12000, 12000),
       y: clamp(typeof body.y === "number" ? body.y : 40, -12000, 12000),
@@ -146,6 +144,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
+  const user = getSsoUserFromRequest(request);
+  if (!user) return unauthorizedSsoResponse();
+
   try {
     const { projectId } = await params;
     const body = (await request.json()) as Record<string, unknown> & {
@@ -189,11 +190,9 @@ export async function PATCH(
         { status: 503 },
       );
     }
-    const memo = db
-      .collection("planningProjects")
-      .doc(projectId)
-      .collection("memos")
-      .doc(body.id);
+    const authorization = await authorizeProject(db, projectId, user, "edit");
+    if (!authorization.ok) return authorization.response;
+    const memo = authorization.reference.collection("memos").doc(body.id);
     if (!(await memo.get()).exists) {
       return Response.json(
         { error: "메모를 찾을 수 없습니다." },
@@ -215,6 +214,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
+  const user = getSsoUserFromRequest(request);
+  if (!user) return unauthorizedSsoResponse();
+
   try {
     const { projectId } = await params;
     const memoId = new URL(request.url).searchParams.get("memoId") ?? "";
@@ -231,11 +233,9 @@ export async function DELETE(
         { status: 503 },
       );
     }
-    const memo = db
-      .collection("planningProjects")
-      .doc(projectId)
-      .collection("memos")
-      .doc(memoId);
+    const authorization = await authorizeProject(db, projectId, user, "edit");
+    if (!authorization.ok) return authorization.response;
+    const memo = authorization.reference.collection("memos").doc(memoId);
     if (!(await memo.get()).exists) {
       return Response.json(
         { error: "메모를 찾을 수 없습니다." },

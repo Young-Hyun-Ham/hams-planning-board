@@ -71,6 +71,7 @@ export function RightPanel({
   onLayerStyle,
   onIconProperties,
   onOptionProperties,
+  readOnly,
 }: {
   selectedName: string;
   selectedLayer?: Layer;
@@ -96,6 +97,7 @@ export function RightPanel({
       "optionLabel" | "optionCount" | "optionOrientation" | "optionItems"
     >,
   ) => void;
+  readOnly: boolean;
 }) {
   const [tab, setTab] = useState<"design" | "code">("design");
   const [codes, setCodes] = useState<PublishingCode>(() =>
@@ -228,7 +230,10 @@ export function RightPanel({
         </button>
       </div>
       {tab === "design" ? (
-        <div className="inspector">
+        <div
+          className={`inspector ${readOnly ? "read-only" : ""}`}
+          aria-disabled={readOnly}
+        >
           <div className="selection-title">
             <span>{selectedName}</span>
             <Icon name="more" size={16} />

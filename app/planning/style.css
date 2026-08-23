@@ -1396,10 +1396,193 @@
   gap: 7px;
   padding: 0 12px;
 }
+.plain-button {
+  color: inherit;
+  text-decoration: none;
+}
 .share-button {
   background: var(--purple);
   color: white;
   font-weight: 600;
+}
+.share-button:disabled {
+  background: #c4c4c8;
+  cursor: not-allowed;
+}
+.access-badge {
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.access-badge.edit {
+  background: #eefbf3;
+  color: #18794e;
+}
+.access-badge.view {
+  background: #f4f4f5;
+  color: #71717a;
+}
+.share-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #18181b66;
+}
+.share-dialog {
+  width: min(560px, 100%);
+  max-height: min(680px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 22px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 24px 70px #00000033;
+}
+.share-dialog > header,
+.share-owner,
+.share-form,
+.share-list-item {
+  display: flex;
+  align-items: center;
+}
+.share-dialog > header {
+  justify-content: space-between;
+  gap: 20px;
+}
+.share-dialog h2,
+.share-dialog p {
+  margin: 0;
+}
+.share-dialog h2 {
+  font-size: 18px;
+}
+.share-dialog header p {
+  margin-top: 5px;
+  color: #71717a;
+  font-size: 11px;
+}
+.share-dialog button,
+.share-dialog input,
+.share-dialog select {
+  height: 36px;
+  border: 1px solid #dedee2;
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+}
+.share-dialog button {
+  padding: 0 12px;
+  cursor: pointer;
+}
+.share-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.share-dialog-close {
+  flex: none;
+}
+.share-owner {
+  gap: 12px;
+  margin-top: 20px;
+  padding: 11px 12px;
+  border-radius: 7px;
+  background: #f7f7f8;
+  font-size: 11px;
+}
+.share-owner span {
+  color: #71717a;
+}
+.share-form {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 138px 64px;
+  gap: 8px;
+  margin-top: 14px;
+}
+.share-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 11px;
+}
+.share-form select {
+  width: 138px;
+  min-width: 0;
+}
+.share-form select,
+.share-list-item select {
+  padding: 0 28px 0 9px;
+}
+.share-dialog .share-submit-button {
+  width: 64px;
+  min-width: 64px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  visibility: visible;
+  border-color: var(--purple);
+  background: var(--purple);
+  color: #fff;
+  font-weight: 700;
+}
+.share-dialog .share-submit-button:disabled {
+  border-color: #b9acef;
+  background: #b9acef;
+  color: #fff;
+}
+.share-error {
+  margin-top: 10px !important;
+  color: #c62828;
+  font-size: 11px;
+}
+.share-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+}
+.share-list-item {
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 7px 6px 12px;
+  border: 1px solid #ededee;
+  border-radius: 8px;
+}
+.share-list-item > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.share-list-item button {
+  color: #c62828;
+}
+.share-empty {
+  padding: 22px 10px;
+  color: #71717a;
+  text-align: center;
+  font-size: 11px;
+}
+.inspector.read-only input,
+.inspector.read-only textarea,
+.inspector.read-only select,
+.inspector.read-only .file-upload-button {
+  pointer-events: none;
+  opacity: 0.65;
+}
+@media (max-width: 600px) {
+  .share-form {
+    grid-template-columns: minmax(0, 1fr) 64px;
+  }
+  .share-form input {
+    grid-column: 1 / -1;
+  }
+  .share-form select {
+    width: 100%;
+  }
 }
 .avatar {
   width: 30px;

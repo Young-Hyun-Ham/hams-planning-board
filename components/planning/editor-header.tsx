@@ -1,5 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
+import { useUserStore } from "@/store";
+import type { ProjectAccessLevel } from "@/types/project-sharing";
 import { Icon } from "./icon";
+import { ShareDialog } from "./share-dialog";
 
 type EditorHeaderProps = {
   saved: string;
@@ -8,6 +14,8 @@ type EditorHeaderProps = {
   onUndo: () => void;
   onRedo: () => void;
   onPreview: () => void;
+  projectId?: string;
+  access: ProjectAccessLevel;
 };
 
 export function EditorHeader({
@@ -17,7 +25,19 @@ export function EditorHeader({
   onUndo,
   onRedo,
   onPreview,
+  projectId,
+  access,
 }: EditorHeaderProps) {
+  const [shareOpen, setShareOpen] = useState(false);
+  const user = useUserStore((state) => state.user);
+  const displayName =
+    user?.displayName ||
+    user?.name ||
+    user?.nickname ||
+    user?.email ||
+    "사용자";
+  const avatarText = displayName.trim().charAt(0).toUpperCase() || "?";
+
   return (
     <header className="topbar">
       <div className="brand">
@@ -66,11 +86,43 @@ export function EditorHeader({
         <button type="button" className="plain-button" onClick={onPreview}>
           <Icon name="play" /> 미리보기
         </button>
-        <button className="share-button">
-          <Icon name="share" /> 공유
-        </button>
-        <div className="avatar">민</div>
+        {access === "owner" ? (
+          <button
+            type="button"
+            className="share-button"
+            disabled={!projectId}
+            title={
+              projectId
+                ? "문서 공유 설정"
+                : "문서를 저장한 후 공유할 수 있습니다."
+            }
+            onClick={() => setShareOpen(true)}
+          >
+            <Icon name="share" /> 공유
+          </button>
+        ) : (
+          <span className={`access-badge ${access}`}>
+            {access === "edit" ? "공유됨 · 수정 가능" : "공유됨 · 보기 전용"}
+          </span>
+        )}
+        <Link className="plain-button" href="/api/auth/logout?returnTo=/">
+          로그아웃
+        </Link>
+        <div
+          className="avatar"
+          title={`${displayName} (${user?.email ?? "로그인 정보 없음"})`}
+          aria-label={`${displayName} 사용자 프로필`}
+        >
+          {avatarText}
+        </div>
       </div>
+      {projectId && (
+        <ShareDialog
+          open={shareOpen}
+          projectId={projectId}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
     </header>
   );
 }

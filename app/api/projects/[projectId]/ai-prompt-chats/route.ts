@@ -1,12 +1,20 @@
 import { FieldValue } from "firebase-admin/firestore";
+import {
+  getSsoUserFromRequest,
+  unauthorizedSsoResponse,
+} from "@hams-fam/sso-client";
 import { getAdminDb } from "@/lib/firebase-admin";
+import { authorizeProject } from "@/lib/project-access";
 
 const validId = (value: string) => /^[A-Za-z0-9_-]{1,128}$/.test(value);
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
+  const user = getSsoUserFromRequest(request);
+  if (!user) return unauthorizedSsoResponse();
+
   try {
     const { projectId } = await params;
     if (!validId(projectId)) {
@@ -24,18 +32,10 @@ export async function GET(
       );
     }
 
-    const project = await db
-      .collection("planningProjects")
-      .doc(projectId)
-      .get();
-    if (!project.exists) {
-      return Response.json(
-        { error: "기획 문서를 찾을 수 없습니다." },
-        { status: 404 },
-      );
-    }
+    const authorization = await authorizeProject(db, projectId, user, "view");
+    if (!authorization.ok) return authorization.response;
 
-    const snapshot = await project.ref
+    const snapshot = await authorization.reference
       .collection("aiPromptChats")
       .orderBy("createdAt", "desc")
       .limit(100)
@@ -65,6 +65,9 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
+  const user = getSsoUserFromRequest(request);
+  if (!user) return unauthorizedSsoResponse();
+
   try {
     const { projectId } = await params;
     if (!validId(projectId)) {
@@ -98,13 +101,9 @@ export async function POST(
       );
     }
 
-    const project = db.collection("planningProjects").doc(projectId);
-    if (!(await project.get()).exists) {
-      return Response.json(
-        { error: "기획 문서를 찾을 수 없습니다." },
-        { status: 404 },
-      );
-    }
+    const authorization = await authorizeProject(db, projectId, user, "edit");
+    if (!authorization.ok) return authorization.response;
+    const project = authorization.reference;
 
     const chat = project.collection("aiPromptChats").doc();
     const batch = db.batch();

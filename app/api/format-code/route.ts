@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  getSsoUserFromRequest,
+  unauthorizedSsoResponse,
+} from "@hams-fam/sso-client";
 import { format } from "prettier";
 import * as astroPlugin from "prettier-plugin-astro";
 import * as sveltePlugin from "prettier-plugin-svelte";
@@ -7,6 +11,8 @@ import { createPublishingCode } from "@/components/planning/editor-data";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  if (!getSsoUserFromRequest(request)) return unauthorizedSsoResponse();
+
   try {
     const body = (await request.json()) as {
       markup?: unknown;

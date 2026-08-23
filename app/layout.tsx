@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AuthInitializer } from "@/components/auth/auth-initializer";
 
 export const metadata: Metadata = {
   title: "PlanCraft — AI 화면 설계서",
@@ -9,7 +10,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="ko" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <AuthInitializer />
+        {children}
+      </body>
     </html>
   );
 }

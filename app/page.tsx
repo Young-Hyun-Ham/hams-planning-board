@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Icon } from "@/components/planning/icon";
+import { useUserStore } from "@/store";
 
 const recentProjects = [
   {
@@ -27,6 +28,12 @@ const recentProjects = [
 const templates = ["빈 화면설계서", "서비스 대시보드", "모바일 앱", "관리자 페이지"];
 
 export default function Home() {
+  const user = useUserStore((state) => state.user);
+  console.log("========> ", user)
+  const displayName =
+    user?.displayName || user?.name || user?.nickname || user?.email || "사용자";
+  const avatarText = displayName.trim().charAt(0).toUpperCase() || "?";
+
   return (
     <main className="home-shell">
       <aside className="home-sidebar" aria-label="프로젝트 탐색">
@@ -67,11 +74,18 @@ export default function Home() {
             <h1>화면설계서를 만들고, 피그마처럼 관리하세요.</h1>
           </div>
           <div className="home-actions">
-            <button type="button" aria-label="검색">
-              <Icon name="cursor" />
-            </button>
-            <Link className="home-secondary-action" href="/preview">
-              미리보기
+            <div className="home-user-info" aria-label="로그인 사용자 정보">
+              <span className="home-user-avatar">{avatarText}</span>
+              <span className="home-user-details">
+                <strong>{displayName}</strong>
+                <small>
+                  {user?.email ?? "로그인 정보 없음"}
+                  {user?.roles.length ? ` · ${user.roles.join(", ")}` : ""}
+                </small>
+              </span>
+            </div>
+            <Link className="home-secondary-action" href="/api/auth/logout?returnTo=/">
+              로그아웃
             </Link>
             <Link className="home-primary-action" href="/planning">
               <Icon name="plus" /> 새 화면설계서
@@ -324,7 +338,6 @@ export default function Home() {
           align-items: center;
           gap: 8px;
         }
-        .home-actions button,
         .home-secondary-action,
         .home-primary-action {
           height: 36px;
@@ -340,9 +353,48 @@ export default function Home() {
           font-size: 13px;
           cursor: pointer;
         }
-        .home-actions button {
-          width: 36px;
-          padding: 0;
+        .home-user-info {
+          min-width: 210px;
+          height: 44px;
+          padding: 0 12px 0 6px;
+          border: 1px solid #dedee2;
+          border-radius: 8px;
+          background: #fff;
+          display: flex;
+          align-items: center;
+          gap: 9px;
+        }
+        .home-user-avatar {
+          width: 32px;
+          height: 32px;
+          flex: 0 0 32px;
+          border-radius: 50%;
+          display: grid;
+          place-items: center;
+          background: #f0edff;
+          color: #5f3fe2;
+          font-size: 13px;
+          font-weight: 800;
+        }
+        .home-user-details {
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .home-user-details strong,
+        .home-user-details small {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .home-user-details strong {
+          font-size: 12px;
+        }
+        .home-user-details small {
+          max-width: 230px;
+          color: #71717a;
+          font-size: 10px;
         }
         .home-primary-action {
           border-color: #6d4aff;
@@ -684,6 +736,9 @@ export default function Home() {
           .home-actions {
             width: 100%;
             flex-wrap: wrap;
+          }
+          .home-user-info {
+            width: 100%;
           }
           .home-primary-action,
           .home-secondary-action {

@@ -1,5 +1,15 @@
 import { FieldValue } from "firebase-admin/firestore";
+import {
+  getSsoUserFromRequest,
+  unauthorizedSsoResponse,
+} from "@hams-fam/sso-client";
 import { getAdminDb } from "@/lib/firebase-admin";
+import {
+  authorizeProject,
+  getProjectAccessLevel,
+  normalizeEmail,
+  validProjectId,
+} from "@/lib/project-access";
 
 type SaveBody = {
   action?: unknown;
@@ -15,10 +25,10 @@ type SaveBody = {
   selected?: unknown;
 };
 
-const validProjectId = (value: unknown): value is string =>
-  typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
-
 export async function GET(request: Request) {
+  const user = getSsoUserFromRequest(request);
+  if (!user) return unauthorizedSsoResponse();
+
   try {
     const db = getAdminDb();
     if (!db)
@@ -33,17 +43,12 @@ export async function GET(request: Request) {
           { error: "올바르지 않은 문서 ID입니다." },
           { status: 400 },
         );
-      const document = await db
-        .collection("planningProjects")
-        .doc(projectId)
-        .get();
-      if (!document.exists)
-        return Response.json(
-          { error: "기획 문서를 찾을 수 없습니다." },
-          { status: 404 },
-        );
+      const authorization = await authorizeProject(db, projectId, user, "view");
+      if (!authorization.ok) return authorization.response;
+      const document = authorization.snapshot;
       const data = document.data() ?? {};
       return Response.json({
+        access: authorization.access,
         project: {
           id: document.id,
           title: data.title,
@@ -63,17 +68,25 @@ export async function GET(request: Request) {
       .orderBy("updatedAt", "desc")
       .limit(50)
       .get();
-    const projects = snapshot.docs.map((document) => {
+    const projects = snapshot.docs.flatMap((document) => {
       const data = document.data();
-      return {
-        id: document.id,
-        title:
-          typeof data.title === "string" && data.title.trim()
-            ? data.title
-            : "제목 없는 문서",
-        status: typeof data.status === "string" ? data.status : "draft",
-        updatedAt: data.updatedAt?.toDate?.().toISOString?.() ?? null,
-      };
+      const access = getProjectAccessLevel(data, user);
+      if (!access) return [];
+
+      return [
+        {
+          id: document.id,
+          title:
+            typeof data.title === "string" && data.title.trim()
+              ? data.title
+              : "제목 없는 문서",
+          status: typeof data.status === "string" ? data.status : "draft",
+          updatedAt: data.updatedAt?.toDate?.().toISOString?.() ?? null,
+          access,
+          ownerEmail:
+            typeof data.ownerEmail === "string" ? data.ownerEmail : user.email,
+        },
+      ];
     });
     return Response.json({ projects });
   } catch (error) {
@@ -86,6 +99,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const user = getSsoUserFromRequest(request);
+  if (!user) return unauthorizedSsoResponse();
+
   try {
     const raw = await request.text();
     if (new TextEncoder().encode(raw).length > 900_000) {
@@ -141,22 +157,32 @@ export async function POST(request: Request) {
     };
 
     if (validProjectId(body.projectId)) {
-      const reference = db.collection("planningProjects").doc(body.projectId);
-      const snapshot = await reference.get();
-      if (!snapshot.exists)
-        return Response.json(
-          { error: "저장할 기획 문서를 찾을 수 없습니다." },
-          { status: 404 },
-        );
+      const authorization = await authorizeProject(
+        db,
+        body.projectId,
+        user,
+        "edit",
+      );
+      if (!authorization.ok) return authorization.response;
+      const reference = authorization.reference;
       await reference.update({ ...data, content: FieldValue.delete() });
-      return Response.json({ id: reference.id, saved: true, updated: true });
+      return Response.json({
+        id: reference.id,
+        saved: true,
+        updated: true,
+        access: authorization.access,
+      });
     }
 
-    const project = await db
-      .collection("planningProjects")
-      .add({ ...data, createdAt: FieldValue.serverTimestamp() });
+    const project = await db.collection("planningProjects").add({
+      ...data,
+      ownerId: user.id,
+      ownerEmail: normalizeEmail(user.email),
+      shares: [],
+      createdAt: FieldValue.serverTimestamp(),
+    });
     return Response.json(
-      { id: project.id, saved: true, updated: false },
+      { id: project.id, saved: true, updated: false, access: "owner" },
       { status: 201 },
     );
   } catch (error) {

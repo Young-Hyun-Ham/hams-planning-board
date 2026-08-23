@@ -67,6 +67,7 @@ export function CanvasEditor({
   focusPageId,
   selected,
   onSelect,
+  readOnly,
 }: {
   layers: Layer[];
   sizes: Record<string, LayerSize>;
@@ -87,6 +88,7 @@ export function CanvasEditor({
   focusPageId: string;
   selected: string;
   onSelect: (id: string) => void;
+  readOnly: boolean;
 }) {
   const [device, setDevice] = useState<Device>("desktop");
   const [tool, setTool] = useState<"cursor" | "hand">("cursor"),
@@ -704,6 +706,10 @@ export function CanvasEditor({
     }
   };
   const saveComment = async () => {
+    if (readOnly) {
+      setCommentError("보기 전용 문서에는 코멘트를 작성할 수 없습니다.");
+      return;
+    }
     if (!projectId) {
       setCommentError("먼저 문서를 저장해주세요.");
       return;
@@ -745,6 +751,7 @@ export function CanvasEditor({
     );
   };
   const saveMemo = async (id: string, update: Partial<CanvasMemo>) => {
+    if (readOnly) return;
     if (!projectId) return;
     try {
       const response = await fetch(
@@ -769,6 +776,7 @@ export function CanvasEditor({
     }
   };
   const addMemo = async () => {
+    if (readOnly) return;
     if (!projectId) {
       window.alert("메모를 추가하려면 먼저 문서를 저장해주세요.");
       return;
@@ -815,6 +823,7 @@ export function CanvasEditor({
     event: React.PointerEvent<HTMLElement>,
     memo: CanvasMemo,
   ) => {
+    if (readOnly) return;
     if (
       event.button !== 0 ||
       (event.target instanceof Element &&
@@ -845,6 +854,7 @@ export function CanvasEditor({
     event: React.PointerEvent<HTMLButtonElement>,
     memo: CanvasMemo,
   ) => {
+    if (readOnly) return;
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -873,6 +883,7 @@ export function CanvasEditor({
     window.addEventListener("pointerup", end);
   };
   const deleteMemo = async (memo: CanvasMemo) => {
+    if (readOnly) return;
     if (!projectId) return;
     if (!window.confirm("이 메모를 삭제하시겠습니까?")) return;
     try {
@@ -917,6 +928,7 @@ export function CanvasEditor({
           <div className="comment-control">
             <button
               className={commentPanel === "write" ? "active" : ""}
+              disabled={readOnly}
               onClick={() => {
                 setCommentError("");
                 setCommentPanel((current) =>
@@ -933,6 +945,7 @@ export function CanvasEditor({
                 <textarea
                   maxLength={1000}
                   value={commentText}
+                  disabled={readOnly}
                   onChange={(event) => setCommentText(event.target.value)}
                   placeholder="공유할 코멘트를 입력하세요."
                   autoFocus
@@ -941,7 +954,7 @@ export function CanvasEditor({
                   <span>{commentText.length}/1000</span>
                   <button
                     onClick={saveComment}
-                    disabled={commentSaving || !commentText.trim()}
+                    disabled={readOnly || commentSaving || !commentText.trim()}
                   >
                     {commentSaving ? "저장 중..." : "저장"}
                   </button>
@@ -996,7 +1009,7 @@ export function CanvasEditor({
           </div>
           <button
             onClick={() => void addMemo()}
-            disabled={memoCreating}
+            disabled={readOnly || memoCreating}
             title="메모 추가"
             aria-label="캔버스에 메모 추가"
           >
@@ -1119,6 +1132,7 @@ export function CanvasEditor({
                         min="20"
                         max="100"
                         value={Math.round(memo.opacity * 100)}
+                        disabled={readOnly}
                         onChange={(event) =>
                           updateMemoLocal(memo.id, {
                             opacity: Number(event.target.value) / 100,
@@ -1141,6 +1155,7 @@ export function CanvasEditor({
                       <input
                         type="color"
                         value={memo.backgroundColor}
+                        disabled={readOnly}
                         onChange={(event) => {
                           const backgroundColor = event.target.value;
                           updateMemoLocal(memo.id, { backgroundColor });
@@ -1150,6 +1165,7 @@ export function CanvasEditor({
                     </label>
                     <button
                       type="button"
+                      disabled={readOnly}
                       title="메모 닫기 및 삭제"
                       aria-label="메모 닫기 및 삭제"
                       onClick={() => void deleteMemo(memo)}
@@ -1161,6 +1177,7 @@ export function CanvasEditor({
                 <textarea
                   maxLength={4000}
                   value={memo.text}
+                  readOnly={readOnly}
                   onChange={(event) =>
                     updateMemoLocal(memo.id, { text: event.target.value })
                   }
@@ -1172,6 +1189,7 @@ export function CanvasEditor({
                 />
                 <button
                   type="button"
+                  disabled={readOnly}
                   className="canvas-memo-resize"
                   title="메모 크기 조절"
                   aria-label="메모 크기 조절"

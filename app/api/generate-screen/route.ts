@@ -4,13 +4,16 @@ import type {
   GeneratedPage,
   LayerEffect,
 } from "@/components/planning/types";
+import {
+  getSsoAccessTokenFromRequest,
+  getSsoServerUrl,
+  getSsoUserFromRequest,
+  unauthorizedSsoResponse,
+} from "@hams-fam/sso-client";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const DEFAULT_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-5.6-sol";
-const MODEL_CACHE_TTL = 5 * 60 * 1_000;
-let modelCache: { expiresAt: number; models: string[] } | undefined;
 const effects = [
   "none",
   "shadow",
@@ -165,80 +168,8 @@ const documentSchema = {
   },
 } as const;
 
-type OpenAIResponse = {
-  output_text?: string;
-  output?: {
-    content?: { type?: string; text?: string }[];
-  }[];
-};
-
-type OpenAIErrorResponse = {
-  error?: { message?: unknown };
-};
-
-type OpenAIModelList = {
-  data?: { id?: unknown }[];
-};
-
-const excludedModelFragments = [
-  "audio",
-  "codex",
-  "embedding",
-  "image",
-  "moderation",
-  "realtime",
-  "search-preview",
-  "transcribe",
-  "tts",
-];
-
-function supportsScreenGeneration(model: string) {
-  const normalized = model.toLowerCase();
-  if (excludedModelFragments.some((fragment) => normalized.includes(fragment)))
-    return false;
-  return (
-    normalized === "chat-latest" ||
-    normalized.startsWith("gpt-5") ||
-    normalized.startsWith("gpt-4.1") ||
-    normalized.startsWith("gpt-4o")
-  );
-}
-
-function compareModels(left: string, right: string) {
-  if (left === DEFAULT_MODEL) return -1;
-  if (right === DEFAULT_MODEL) return 1;
-  return right.localeCompare(left, "en", { numeric: true });
-}
-
-async function loadModels(apiKey: string) {
-  if (modelCache && modelCache.expiresAt > Date.now()) return modelCache.models;
-
-  const response = await fetch("https://api.openai.com/v1/models", {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error("OPENAI_MODEL_LIST_FAILED");
-
-  const result = (await response.json()) as OpenAIModelList;
-  const models = Array.from(
-    new Set([
-      DEFAULT_MODEL,
-      ...(result.data ?? [])
-        .map((item) => item.id)
-        .filter((id): id is string => typeof id === "string")
-        .filter(supportsScreenGeneration),
-    ]),
-  ).sort(compareModels);
-  modelCache = { expiresAt: Date.now() + MODEL_CACHE_TTL, models };
-  return models;
-}
-
 function isValidModelId(model: string) {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(model);
-}
-
-function supportsReasoning(model: string) {
-  return model.startsWith("gpt-5");
 }
 
 const clamp = (value: number, minimum: number, maximum: number) =>
@@ -365,38 +296,9 @@ function normalizeDocument(document: GeneratedDocument): GeneratedDocument {
   };
 }
 
-function responseText(response: OpenAIResponse) {
-  if (response.output_text) return response.output_text;
-  return (response.output ?? [])
-    .flatMap((item) => item.content ?? [])
-    .filter((content) => content.type === "output_text")
-    .map((content) => content.text ?? "")
-    .join("");
-}
-
-export async function GET() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return Response.json({
-      models: [DEFAULT_MODEL],
-      defaultModel: DEFAULT_MODEL,
-      warning: "서버에 OPENAI_API_KEY를 설정해주세요.",
-    });
-  }
-
-  try {
-    const models = await loadModels(apiKey);
-    return Response.json({ models, defaultModel: DEFAULT_MODEL });
-  } catch {
-    return Response.json({
-      models: [DEFAULT_MODEL],
-      defaultModel: DEFAULT_MODEL,
-      warning: "OpenAI 모델 목록을 불러오지 못해 기본 모델을 사용합니다.",
-    });
-  }
-}
-
 export async function POST(request: Request) {
+  if (!getSsoUserFromRequest(request)) return unauthorizedSsoResponse();
+
   try {
     const body = (await request.json()) as {
       prompt?: unknown;
@@ -425,99 +327,82 @@ export async function POST(request: Request) {
       );
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
+    const accessToken = getSsoAccessTokenFromRequest(request);
+    if (!accessToken) {
       return Response.json(
-        { error: "서버에 OPENAI_API_KEY를 설정해주세요." },
-        { status: 503 },
+        { error: "SSO AI 접근 토큰이 없습니다. 다시 로그인해 주세요." },
+        { status: 401 },
       );
     }
 
     const model =
       typeof body.model === "string" && body.model.trim()
         ? body.model.trim()
-        : DEFAULT_MODEL;
+        : "";
     if (!isValidModelId(model)) {
       return Response.json(
-        { error: "올바르지 않은 OpenAI 모델 ID입니다." },
-        { status: 400 },
-      );
-    }
-    const availableModels = await loadModels(apiKey);
-    if (!availableModels.includes(model)) {
-      return Response.json(
-        { error: `${model} 모델은 현재 API 키로 사용할 수 없습니다.` },
+        { error: "올바르지 않은 AI 모델 ID입니다." },
         { status: 400 },
       );
     }
 
-    const openAIResponse = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        store: false,
-        ...(supportsReasoning(model)
-          ? { reasoning: { effort: "medium" } }
-          : {}),
-        max_output_tokens: 16_000,
-        instructions: [
-          "You are a senior product UI designer editing an existing multi-page planning document.",
-          "The input contains the user's latest request and the authoritative currentDocument snapshot.",
-          "Apply the request to currentDocument and return the entire updated document using the provided schema.",
-          "Preserve every existing page and element unless the user explicitly asks to remove or replace it.",
-          "Preserve the id and parentId of unchanged pages and elements exactly. Create unique descriptive ids only for new items.",
-          "When the user asks to add a page, keep all current pages and append the new page to the right with an 80px workspace gap.",
-          "Set activePageId to the page most directly created or modified by the latest request.",
-          "When the current document contains one empty page and the user asks to design a screen, use that existing page instead of adding a duplicate page unless requested.",
-          "Use the same language as the user's request for visible copy.",
-          "Keep every element fully inside the page and avoid accidental overlaps.",
-          "Use section/layer elements as background panels and place them before foreground text, buttons, images, and icons so z-order is correct.",
-          "For each newly designed page, use 10 to 24 elements when the request does not specify complexity.",
-          "parentId must be the containing page id or a section/layer id on the same page.",
-          "For image elements, design tasteful image placeholders using backgroundColor; do not invent URLs.",
-          "Use borderWidth 0 when an element should have no visible border.",
-          "For irrelevant fields, provide sensible neutral values required by the schema.",
-        ].join("\n"),
-        input: modelInput,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "planning_board_document",
-            strict: true,
-            schema: documentSchema,
-          },
-          ...(supportsReasoning(model) ? { verbosity: "low" } : {}),
+    const ssoResponse = await fetch(
+      new URL("/api/sso/ai/generate", getSsoServerUrl()),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
         },
-      }),
-      signal: AbortSignal.timeout(120_000),
-    });
+        cache: "no-store",
+        body: JSON.stringify({
+          model,
+          maxOutputTokens: 16_000,
+          reasoningEffort: "medium",
+          instructions: [
+            "You are a senior product UI designer editing an existing multi-page planning document.",
+            "The input contains the user's latest request and the authoritative currentDocument snapshot.",
+            "Apply the request to currentDocument and return the entire updated document using the provided schema.",
+            "Preserve every existing page and element unless the user explicitly asks to remove or replace it.",
+            "Preserve the id and parentId of unchanged pages and elements exactly. Create unique descriptive ids only for new items.",
+            "When the user asks to add a page, keep all current pages and append the new page to the right with an 80px workspace gap.",
+            "Set activePageId to the page most directly created or modified by the latest request.",
+            "When the current document contains one empty page and the user asks to design a screen, use that existing page instead of adding a duplicate page unless requested.",
+            "Use the same language as the user's request for visible copy.",
+            "Keep every element fully inside the page and avoid accidental overlaps.",
+            "Use section/layer elements as background panels and place them before foreground text, buttons, images, and icons so z-order is correct.",
+            "For each newly designed page, use 10 to 24 elements when the request does not specify complexity.",
+            "parentId must be the containing page id or a section/layer id on the same page.",
+            "For image elements, design tasteful image placeholders using backgroundColor; do not invent URLs.",
+            "Use borderWidth 0 when an element should have no visible border.",
+            "For irrelevant fields, provide sensible neutral values required by the schema.",
+          ].join("\n"),
+          prompt: modelInput,
+          schemaName: "planning_board_document",
+          schema: documentSchema,
+        }),
+        signal: AbortSignal.timeout(120_000),
+      },
+    );
 
-    if (!openAIResponse.ok) {
-      const status = openAIResponse.status;
-      const errorResponse = (await openAIResponse
-        .json()
-        .catch(() => ({}))) as OpenAIErrorResponse;
-      const detail =
-        typeof errorResponse.error?.message === "string"
-          ? errorResponse.error.message.trim()
-          : "";
-      const error =
-        status === 401
-          ? "OpenAI API 키가 올바르지 않습니다."
-          : status === 403
-            ? `${model} 모델 접근 권한을 확인해주세요.`
-            : status === 429
-              ? detail || "OpenAI API 사용량 또는 요청 한도를 확인해주세요."
-              : detail || "OpenAI에서 화면을 생성하지 못했습니다.";
-      return Response.json({ error }, { status: status === 429 ? 429 : 502 });
+    const response = (await ssoResponse.json().catch(() => null)) as {
+      ok?: boolean;
+      output?: string;
+      error?: string;
+      message?: string;
+    } | null;
+    if (!ssoResponse.ok || !response?.ok) {
+      return Response.json(
+        {
+          error:
+            response?.message ??
+            "SSO 서버에서 AI 화면 생성 결과를 받지 못했습니다.",
+        },
+        { status: ssoResponse.status || 502 },
+      );
     }
 
-    const response = (await openAIResponse.json()) as OpenAIResponse;
-    const output = responseText(response);
+    const output = response.output;
     if (!output) {
       return Response.json(
         { error: "AI가 화면 설계 결과를 반환하지 않았습니다." },

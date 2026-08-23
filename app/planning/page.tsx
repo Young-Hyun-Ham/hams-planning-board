@@ -19,6 +19,8 @@ import type {
   LayerStyle,
   PreviewDocument,
 } from "@/components/planning/types";
+import { useUserStore } from "@/store";
+import type { ProjectAccessLevel } from "@/types/project-sharing";
 
 const defaultLayerSize = (kind: Layer["kind"]): LayerSize =>
   kind === "page"
@@ -224,6 +226,7 @@ function createEditorState(
 }
 
 export default function Home() {
+  const aiEnabled = useUserStore((state) => state.user?.aiEnabled === true);
   const [selected, setSelected] = useState("page");
   const [selectedIds, setSelectedIds] = useState<string[]>(["page"]);
   const [selectionAnchor, setSelectionAnchor] = useState("page");
@@ -248,6 +251,8 @@ export default function Home() {
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [projectId, setProjectId] = useState<string>();
+  const [projectAccess, setProjectAccess] =
+    useState<ProjectAccessLevel>("owner");
   const [documentTitle, setDocumentTitle] = useState("Page");
   const [saved, setSaved] = useState("저장됨");
   const [focusRequestKey, setFocusRequestKey] = useState(0);
@@ -450,24 +455,24 @@ export default function Home() {
   });
 
   useEffect(() => {
+    if (!aiEnabled) return;
+
     const controller = new AbortController();
-    fetch("/api/generate-screen", { signal: controller.signal })
+    fetch("/api/ai/models", { signal: controller.signal })
       .then(async (response) => {
         const result = (await response.json()) as {
           models?: string[];
           defaultModel?: string;
-          warning?: string;
+          message?: string;
         };
         if (!response.ok || !result.models?.length) {
-          throw new Error("OpenAI 모델 목록을 불러오지 못했습니다.");
+          throw new Error(
+            result.message ?? "AI 모델 목록을 불러오지 못했습니다.",
+          );
         }
         setModels(result.models);
-        setModel((current) =>
-          current && result.models?.includes(current)
-            ? current
-            : (result.defaultModel ?? result.models?.[0] ?? ""),
-        );
-        setModelWarning(result.warning ?? "");
+        setModel(result.defaultModel ?? result.models[0] ?? "");
+        setModelWarning("");
       })
       .catch((error) => {
         if (error instanceof Error && error.name !== "AbortError") {
@@ -478,7 +483,7 @@ export default function Home() {
         if (!controller.signal.aborted) setModelsLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [aiEnabled]);
 
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
@@ -839,6 +844,10 @@ export default function Home() {
     setSaved("새 페이지 추가됨");
   };
   const saveProject = async () => {
+    if (projectAccess === "view") {
+      setSaved("보기 전용 문서는 저장할 수 없습니다.");
+      return;
+    }
     setSaving(true);
     setSaved("저장 중...");
     try {
@@ -862,11 +871,13 @@ export default function Home() {
       const result = (await response.json()) as {
         id?: string;
         saved?: boolean;
+        access?: ProjectAccessLevel;
         error?: string;
       };
       if (!response.ok || !result.saved)
         throw new Error(result.error ?? "저장에 실패했습니다.");
       if (result.id) setProjectId(result.id);
+      if (result.access) setProjectAccess(result.access);
       setSaved("Firebase에 저장됨");
     } catch (error) {
       setSaved(error instanceof Error ? error.message : "저장 실패");
@@ -889,6 +900,7 @@ export default function Home() {
       `/api/projects?projectId=${encodeURIComponent(id)}`,
     );
     const result = (await response.json()) as {
+      access?: ProjectAccessLevel;
       project?: {
         id: string;
         title?: unknown;
@@ -958,10 +970,17 @@ export default function Home() {
       typeof project.selected === "string" ? project.selected : "page",
     );
     setProjectId(project.id);
-    setSaved("Firebase에서 불러옴");
+    setProjectAccess(result.access ?? "view");
+    setSaved(
+      result.access === "view" ? "보기 전용으로 불러옴" : "Firebase에서 불러옴",
+    );
   };
 
   const generate = async () => {
+    if (projectAccess === "view") {
+      setSaved("보기 전용 문서는 수정할 수 없습니다.");
+      return;
+    }
     const requestPrompt = prompt.trim();
     const requestedModel = model;
     if (!requestPrompt || !requestedModel) return;
@@ -1040,6 +1059,7 @@ export default function Home() {
       });
       const saveResult = (await saveResponse.json()) as {
         id?: string;
+        access?: ProjectAccessLevel;
         error?: string;
       };
       if (!saveResponse.ok || !saveResult.id) {
@@ -1049,6 +1069,7 @@ export default function Home() {
       }
       const historyProjectId = saveResult.id;
       setProjectId(saveResult.id);
+      if (saveResult.access) setProjectAccess(saveResult.access);
 
       const historyResponse = await fetch(
         `/api/projects/${encodeURIComponent(historyProjectId)}/ai-prompt-chats`,
@@ -1091,16 +1112,19 @@ export default function Home() {
     <main className="app-shell">
       <EditorHeader
         saved={saved}
-        canUndo={historyStatus.undo > 0}
-        canRedo={historyStatus.redo > 0}
+        canUndo={projectAccess !== "view" && historyStatus.undo > 0}
+        canRedo={projectAccess !== "view" && historyStatus.redo > 0}
         onUndo={undo}
         onRedo={redo}
         onPreview={openPreview}
+        projectId={projectId}
+        access={projectAccess}
       />
       <section className="workspace">
         <LeftPanel
           title={documentTitle}
           onRenameTitle={(name) => {
+            if (projectAccess === "view") return;
             setDocumentTitle(name);
             setSaved("문서 제목 수정됨");
           }}
@@ -1108,23 +1132,42 @@ export default function Home() {
           selectedIds={selectedIds}
           selectionAnchor={selectionAnchor}
           onSelect={selectLayer}
-          onMoveToParent={moveLayersToParent}
-          onRename={renameLayer}
-          onAdd={addLayer}
-          onDelete={deleteLayer}
-          onToggleVisibility={toggleVisibility}
-          onToggleLock={toggleLock}
-          onNewPage={addPage}
+          onMoveToParent={(...args) => {
+            if (projectAccess !== "view") moveLayersToParent(...args);
+          }}
+          onRename={(...args) => {
+            if (projectAccess !== "view") renameLayer(...args);
+          }}
+          onAdd={(parentId, kind) => {
+            if (projectAccess !== "view") addLayer(parentId, kind);
+          }}
+          onDelete={(id) => {
+            if (projectAccess !== "view") deleteLayer(id);
+          }}
+          onToggleVisibility={(id) => {
+            if (projectAccess !== "view") toggleVisibility(id);
+          }}
+          onToggleLock={(id) => {
+            if (projectAccess !== "view") toggleLock(id);
+          }}
+          onNewPage={() => {
+            if (projectAccess !== "view") addPage();
+          }}
           onSave={saveProject}
-          onDeletePage={deleteSelectedPage}
+          onDeletePage={() => {
+            if (projectAccess !== "view") deleteSelectedPage();
+          }}
           onOpenProject={openProject}
           canDeletePage={
+            projectAccess !== "view" &&
             selectedLayer?.kind === "page" &&
             layers.filter((item) => item.kind === "page").length > 1
           }
           saving={saving}
           prompt={prompt}
-          onPromptChange={setPrompt}
+          onPromptChange={(value) => {
+            if (projectAccess !== "view") setPrompt(value);
+          }}
           models={models}
           model={model}
           onModelChange={setModel}
@@ -1134,6 +1177,7 @@ export default function Home() {
           aiHistoryVersion={aiHistoryVersion}
           onGenerate={generate}
           generating={generating}
+          readOnly={projectAccess === "view"}
         />
         <CanvasEditor
           projectId={projectId}
@@ -1145,19 +1189,28 @@ export default function Home() {
           layerText={layerText}
           layerImages={layerImages}
           layerStyles={layerStyles}
-          onDelete={deleteLayer}
-          onAdd={addLayer}
-          onReorder={reorderLayer}
+          onDelete={(id) => {
+            if (projectAccess !== "view") deleteLayer(id);
+          }}
+          onAdd={(...args) => {
+            if (projectAccess !== "view") addLayer(...args);
+          }}
+          onReorder={(...args) => {
+            if (projectAccess !== "view") reorderLayer(...args);
+          }}
           onResize={(id, size) => {
+            if (projectAccess === "view") return;
             setSizes((current) => ({ ...current, [id]: size }));
             setSaved("크기 수정됨");
           }}
           onMove={(id, position) => {
+            if (projectAccess === "view") return;
             setPositions((current) => ({ ...current, [id]: position }));
             setSaved("위치 수정됨");
           }}
           selected={selected}
           onSelect={selectLayer}
+          readOnly={projectAccess === "view"}
         />
         <RightPanel
           selectedName={selectedName}
@@ -1168,22 +1221,27 @@ export default function Home() {
           size={sizes[selected]}
           position={positions[selected]}
           onLayerText={(value) => {
+            if (projectAccess === "view") return;
             setLayerText((current) => ({ ...current, [selected]: value }));
             setSaved("텍스트 수정됨");
           }}
           onImage={(value) => {
+            if (projectAccess === "view") return;
             setLayerImages((current) => ({ ...current, [selected]: value }));
             setSaved("이미지 변경됨");
           }}
           onSize={(size) => {
+            if (projectAccess === "view") return;
             setSizes((current) => ({ ...current, [selected]: size }));
             setSaved("크기 수정됨");
           }}
           onPosition={(position) => {
+            if (projectAccess === "view") return;
             setPositions((current) => ({ ...current, [selected]: position }));
             setSaved("위치 수정됨");
           }}
           onLayerStyle={(style) => {
+            if (projectAccess === "view") return;
             setLayerStyles((current) => ({
               ...current,
               [selected]: { ...current[selected], ...style },
@@ -1191,6 +1249,7 @@ export default function Home() {
             setSaved("스타일 수정됨");
           }}
           onIconProperties={(properties) => {
+            if (projectAccess === "view") return;
             updateLayerState(selected, (layer) => ({
               ...layer,
               ...properties,
@@ -1198,12 +1257,14 @@ export default function Home() {
             setSaved("아이콘 속성 수정됨");
           }}
           onOptionProperties={(properties) => {
+            if (projectAccess === "view") return;
             updateLayerState(selected, (layer) => ({
               ...layer,
               ...properties,
             }));
             setSaved("선택 옵션 속성 수정됨");
           }}
+          readOnly={projectAccess === "view"}
         />
       </section>
       {errorSnackbar && (
