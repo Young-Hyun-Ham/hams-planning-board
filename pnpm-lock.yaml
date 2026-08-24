@@ -15,8 +15,8 @@ importers:
         specifier: ^11.14.1
         version: 11.14.1(@emotion/react@11.14.0(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
       '@hams-fam/sso-client':
-        specifier: ^0.1.4
-        version: 0.1.4(next@16.3.1(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))
+        specifier: ^0.1.6
+        version: 0.1.6(next@16.3.1(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))
       '@mui/icons-material':
         specifier: ^9.3.1
         version: 9.3.1(@mui/material@9.3.1(@emotion/react@11.14.0(@types/react@19.2.18)(react@19.2.8))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
@@ -335,8 +335,8 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  '@hams-fam/sso-client@0.1.4':
-    resolution: {integrity: sha512-gFrULPHV0WYGxRjJehGPJKxb7YxRuWK07UUr3o9BMscdZEG59ygV6rOiHGl5FwhiRSAze42fvOZDEsLGj0SblA==}
+  '@hams-fam/sso-client@0.1.6':
+    resolution: {integrity: sha512-LcDn3S5cflAFxu+t/FAc6Cq2EFVleSTn0oKkus6y9poT0E2CBOpHBg95s8G5dtQz4BXs4EB4ZfxR5+FVefEP8g==}
     engines: {node: '>=20.9.0'}
     peerDependencies:
       next: '>=16.0.0'
@@ -3309,7 +3309,7 @@ snapshots:
       yargs: 17.7.3
     optional: true
 
-  '@hams-fam/sso-client@0.1.4(next@16.3.1(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))':
+  '@hams-fam/sso-client@0.1.6(next@16.3.1(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))':
     optionalDependencies:
       next: 16.3.1(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
 
