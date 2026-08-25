@@ -360,6 +360,38 @@
 .project-list-state.error {
   color: #dc2626;
 }
+.project-login-state {
+  min-height: 150px;
+  padding: 24px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+}
+.project-login-state p {
+  margin: 0;
+  color: #8b8b93;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.project-login-state a {
+  width: 100%;
+  max-width: 150px;
+  height: 34px;
+  border-radius: 6px;
+  background: #6545e8;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.project-login-state a:hover {
+  background: #5638d1;
+}
 
 .layer-row-actions {
   margin-left: auto;
@@ -521,6 +553,9 @@
   font-size: 12px;
   font-weight: 400;
   cursor: pointer;
+}
+.page-menu-button-tooltip {
+  display: block;
 }
 .page-menu button:hover:not(:disabled) {
   background: #f2efff;

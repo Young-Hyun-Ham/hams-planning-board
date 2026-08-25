@@ -105,9 +105,18 @@ export function EditorHeader({
             {access === "edit" ? "공유됨 · 수정 가능" : "공유됨 · 보기 전용"}
           </span>
         )}
-        <Link className="plain-button" href="/api/auth/logout?returnTo=/">
-          로그아웃
-        </Link>
+        {user ? (
+          <Link
+            className="plain-button"
+            href="/api/auth/logout?returnTo=/login"
+          >
+            로그아웃
+          </Link>
+        ) : (
+          <Link className="plain-button" href="/login?returnTo=/planning">
+            로그인
+          </Link>
+        )}
         <div
           className="avatar"
           title={`${displayName} (${user?.email ?? "로그인 정보 없음"})`}

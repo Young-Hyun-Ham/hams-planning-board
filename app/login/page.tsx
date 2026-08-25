@@ -1,6 +1,5 @@
 import { normalizeReturnTo } from "@hams-fam/sso-client";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
 const ERROR_MESSAGES: Record<string, string> = {
   sso_state: "로그인 요청 검증에 실패했습니다. 다시 로그인해 주세요.",
@@ -14,10 +13,6 @@ export default async function LoginPage({
 }) {
   const { error, returnTo: requestedReturnTo } = await searchParams;
   const returnTo = normalizeReturnTo(requestedReturnTo);
-
-  if (!error) {
-    redirect(`/api/sso/login?returnTo=${encodeURIComponent(returnTo)}`);
-  }
 
   return (
     <main
@@ -44,7 +39,10 @@ export default async function LoginPage({
         <p style={{ margin: 0, color: "#6d4aff", fontWeight: 800 }}>HAMS SSO</p>
         <h1 style={{ margin: "12px 0", fontSize: 26 }}>로그인이 필요합니다</h1>
         <p style={{ margin: "0 0 24px", color: "#52525b", lineHeight: 1.6 }}>
-          {ERROR_MESSAGES[error] ?? "로그인을 완료하지 못했습니다. 다시 시도해 주세요."}
+          {error
+            ? (ERROR_MESSAGES[error] ??
+              "로그인을 완료하지 못했습니다. 다시 시도해 주세요.")
+            : "HAMS 계정으로 로그인하거나 로그인 없이 서비스를 둘러볼 수 있습니다."}
         </p>
         <Link
           href={`/api/sso/login?returnTo=${encodeURIComponent(returnTo)}`}
@@ -60,7 +58,24 @@ export default async function LoginPage({
             textDecoration: "none",
           }}
         >
-          통합 로그인 다시 시도
+          HAMS 계정으로 로그인
+        </Link>
+        <Link
+          href={returnTo}
+          style={{
+            display: "flex",
+            minHeight: 44,
+            marginTop: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid #ddd6fe",
+            borderRadius: 9,
+            color: "#5f3fe2",
+            fontWeight: 700,
+            textDecoration: "none",
+          }}
+        >
+          로그인 없이 둘러보기
         </Link>
       </section>
     </main>

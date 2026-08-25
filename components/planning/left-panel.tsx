@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useUserStore } from "@/store";
 import { AiScreenGenerator } from "./ai-screen-generator";
 import { Icon } from "./icon";
 import type { Layer } from "./types";
@@ -239,6 +241,8 @@ export function LeftPanel({
   generating,
   readOnly,
 }: Props) {
+  const user = useUserStore((state) => state.user);
+  const isLoadingUser = useUserStore((state) => state.isLoading);
   const [menu, setMenu] = useState<{
       x: number;
       y: number;
@@ -332,7 +336,15 @@ export function LeftPanel({
   }, [readOnly, tab, title, onRenameTitle]);
   useEffect(() => {
     if (tab !== "pages") return;
+    if (!user) {
+      setProjects([]);
+      setProjectsError("");
+      setProjectsLoading(false);
+      return;
+    }
     const controller = new AbortController();
+    setProjectsLoading(true);
+    setProjectsError("");
     fetch("/api/projects", { signal: controller.signal })
       .then(async (response) => {
         const result = (await response.json()) as {
@@ -357,7 +369,7 @@ export function LeftPanel({
         if (!controller.signal.aborted) setProjectsLoading(false);
       });
     return () => controller.abort();
-  }, [tab]);
+  }, [tab, user]);
   const additions: { kind: Layer["kind"]; label: string }[] = [
     { kind: "layer", label: "Layer" },
     { kind: "section", label: "Section" },
@@ -464,7 +476,14 @@ export function LeftPanel({
           <span>{projects.length}</span>
         </div>
         <div className="project-list">
-          {projectsLoading ? (
+          {isLoadingUser ? (
+            <div className="project-list-state">로그인 확인 중...</div>
+          ) : !user ? (
+            <div className="project-login-state">
+              <p>로그인하면 저장된 페이지를 확인할 수 있습니다.</p>
+              <Link href="/login?returnTo=/planning">로그인</Link>
+            </div>
+          ) : projectsLoading ? (
             <div className="project-list-state">불러오는 중...</div>
           ) : projectsError ? (
             <div className="project-list-state error">{projectsError}</div>
@@ -542,16 +561,21 @@ export function LeftPanel({
             >
               <Icon name="plus" size={14} />새 페이지 추가
             </button>
-            <button
-              onClick={() => {
-                onSave();
-                setPageMenu(false);
-              }}
-              disabled={saving || readOnly}
+            <span
+              className="page-menu-button-tooltip"
+              title={!user ? "로그인을 해주세요" : undefined}
             >
-              <span>◇</span>
-              {saving ? "저장 중..." : "저장"}
-            </button>
+              <button
+                onClick={() => {
+                  onSave();
+                  setPageMenu(false);
+                }}
+                disabled={saving || readOnly || !user}
+              >
+                <span>◇</span>
+                {saving ? "저장 중..." : "저장"}
+              </button>
+            </span>
             <div className="context-separator" />
             <button
               className="context-delete"
