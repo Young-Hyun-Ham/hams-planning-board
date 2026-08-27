@@ -18,6 +18,9 @@ export type User = {
   provider: string;
   providerSubject: string | null;
   phoneNumber: string | null;
+  birthDate: string | null;
+  gender: "male" | "female" | "other" | "prefer_not_to_say" | null;
+  serviceMemberships: ServiceMembership[];
   aiEnabled: boolean;
   aiChatType: string;
   chatModel: string;
@@ -36,12 +39,24 @@ export type SsoUser = {
   providerSubject: string | null;
   phoneNumber: string | null;
   termsVersion: string | null;
+  birthDate: string | null;
+  gender: "male" | "female" | "other" | "prefer_not_to_say" | null;
+  serviceMemberships: ServiceMembership[];
 
   aiEnabled: boolean;
   aiChatType: "gpt" | "gemini" | "claude" | null;
   chatModel: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ServiceMembership = {
+  serviceSiteId: string;
+  clientId: string;
+  serviceName: string;
+  plan: "basic" | "standard" | "premium";
+  monthlyPrice: number;
+  joinedAt: string;
 };
 
 export const USER_MOCK_DATA: User = {
@@ -60,6 +75,9 @@ export const USER_MOCK_DATA: User = {
   provider: "google",
   providerSubject: null,
   phoneNumber: "01099360110",
+  birthDate: null,
+  gender: null,
+  serviceMemberships: [],
   aiEnabled: true,
   aiChatType: "gpt",
   chatModel: "gpt-3.5-turbo",
@@ -98,6 +116,11 @@ export function createUserFromSso(ssoUser: SsoUser): User {
     provider: ssoUser.provider,
     providerSubject: ssoUser.providerSubject,
     phoneNumber: ssoUser.phoneNumber,
+    birthDate: ssoUser.birthDate ?? null,
+    gender: ssoUser.gender ?? null,
+    serviceMemberships: Array.isArray(ssoUser.serviceMemberships)
+      ? ssoUser.serviceMemberships
+      : [],
     termsAcceptedAt: null,
     termsVersion: ssoUser.termsVersion,
 

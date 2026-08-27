@@ -23,11 +23,15 @@ export function AuthInitializer() {
     })
       .then(async (response) => {
         const result = (await response.json()) as {
-          user?: SsoUser;
+          user?: SsoUser | null;
           error?: string;
         };
-        if (!response.ok || !result.user) {
+        if (!response.ok) {
           throw new Error(result.error ?? "로그인 정보를 확인하지 못했습니다.");
+        }
+        if (!result.user) {
+          clearUser();
+          return;
         }
         setUser(createUserFromSso(result.user));
       })
