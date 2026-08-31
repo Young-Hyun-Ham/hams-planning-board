@@ -6,3 +6,13 @@
   --line: #e7e7e9;
   --purple: #6d4aff;
 }
+
+a,
+button {
+  cursor: pointer;
+}
+
+button:disabled,
+a[aria-disabled="true"] {
+  cursor: not-allowed;
+}

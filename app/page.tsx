@@ -26,10 +26,10 @@ type CommentSummary = {
 };
 
 const templates = [
-  ["빈 화면설계서", "자유롭게 시작하는 기본 캔버스"],
-  ["서비스 대시보드", "지표와 목록 중심의 관리 화면"],
-  ["모바일 예약", "모바일 서비스 흐름 설계"],
-  ["관리자 페이지", "검색·목록·상세 기본 구성"],
+  ["빈 화면설계서", "자유롭게 시작하는 기본 캔버스", ""],
+  ["서비스 대시보드", "지표와 목록 중심의 관리 화면", "service-dashboard"],
+  ["모바일 예약", "모바일 서비스 흐름 설계", "mobile-booking"],
+  ["관리자 페이지", "검색·목록·상세 기본 구성", "admin-page"],
 ];
 
 const SERVICE_CLIENT_ID = "hams-planning-board";
@@ -336,7 +336,10 @@ export default function Home() {
               ) : projects.length ? (
                 <div className="project-list">
                   {projects.slice(0, 6).map((project) => (
-                    <Link href="/planning" key={project.id}>
+                    <Link
+                      href={`/planning?projectId=${encodeURIComponent(project.id)}`}
+                      key={project.id}
+                    >
                       <b>
                         <Icon name="page" />
                       </b>
@@ -367,8 +370,13 @@ export default function Home() {
             <section className="content-card" id="templates">
               <CardHead eyebrow="TEMPLATES" title="빠른 시작" />
               <div className="template-grid">
-                {templates.map(([title, description], index) => (
-                  <Link href="/planning" key={title}>
+                {templates.map(([title, description, template], index) => (
+                  <Link
+                    href={
+                      template ? `/planning?template=${template}` : "/planning"
+                    }
+                    key={title}
+                  >
                     <b>{String(index + 1).padStart(2, "0")}</b>
                     <strong>{title}</strong>
                     <small>{description}</small>

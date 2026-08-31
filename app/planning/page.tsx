@@ -894,10 +894,11 @@ export default function Home() {
     deleteLayer(selectedLayer.id);
     setSaved("페이지 삭제됨");
   };
-  const openProject = async (id: string) => {
+  const openProject = async (id: string, signal?: AbortSignal) => {
     setSaved("불러오는 중...");
     const response = await fetch(
       `/api/projects?projectId=${encodeURIComponent(id)}`,
+      { signal },
     );
     const result = (await response.json()) as {
       access?: ProjectAccessLevel;
@@ -975,6 +976,70 @@ export default function Home() {
       result.access === "view" ? "보기 전용으로 불러옴" : "Firebase에서 불러옴",
     );
   };
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const projectIdParam = searchParams.get("projectId");
+    const templateName = searchParams.get("template");
+    if (!projectIdParam && !templateName) return;
+
+    const controller = new AbortController();
+    if (projectIdParam) {
+      Promise.resolve()
+        .then(() => openProject(projectIdParam, controller.signal))
+        .catch((error) => {
+          if (error instanceof Error && error.name !== "AbortError") {
+            setSaved(error.message);
+            setErrorSnackbar({ id: Date.now(), message: error.message });
+          }
+        });
+      return () => controller.abort();
+    }
+
+    fetch(`/template-data?template=${encodeURIComponent(templateName!)}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const result = (await response.json()) as {
+          template?: GeneratedDocument;
+          error?: string;
+        };
+        if (!response.ok || !result.template) {
+          throw new Error(result.error ?? "템플릿을 불러오지 못했습니다.");
+        }
+        const nextState = createEditorState(result.template, {});
+        const activePageId =
+          result.template.activePageId || nextState.layers[0]?.id || "page";
+        const snapshot = {
+          title: result.template.title,
+          layers: nextState.layers,
+          sizes: nextState.sizes,
+          positions: nextState.positions,
+          layerText: nextState.text,
+          layerImages: nextState.images,
+          layerStyles: nextState.styles,
+        };
+        resetDocumentHistory(snapshot);
+        applyEditorSnapshot(snapshot);
+        setSelected(activePageId);
+        setSelectedIds([activePageId]);
+        setSelectionAnchor(activePageId);
+        setFocusPageId(activePageId);
+        setFocusRequestKey((current) => current + 1);
+        setProjectId(undefined);
+        setProjectAccess("owner");
+        setSaved("템플릿에서 새 문서 생성됨");
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name !== "AbortError") {
+          setSaved(error.message);
+          setErrorSnackbar({ id: Date.now(), message: error.message });
+        }
+      });
+    return () => controller.abort();
+    // URL의 최초 템플릿만 새 문서로 불러오며 편집 중 재실행하지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const generate = async () => {
     if (projectAccess === "view") {
