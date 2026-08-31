@@ -32,6 +32,16 @@ export function getProjectAccessLevel(
     return "owner";
   }
 
+  const review =
+    data.review && typeof data.review === "object" ? data.review : null;
+  if (
+    review &&
+    typeof review.reviewerEmail === "string" &&
+    normalizeEmail(review.reviewerEmail) === userEmail
+  ) {
+    return "view";
+  }
+
   const shares = Array.isArray(data.shares) ? data.shares : [];
   const share = shares.find(
     (item) =>

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AuthInitializer } from "@/components/auth/auth-initializer";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "PlanCraft — AI 화면 설계서",

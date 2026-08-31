@@ -15,6 +15,8 @@ type ProjectSummary = {
   updatedAt: string | null;
   access: ProjectAccess;
   ownerEmail: string;
+  reviewerEmail: string | null;
+  isReviewer: boolean;
 };
 type CommentSummary = {
   id: string;
@@ -348,11 +350,13 @@ export default function Home() {
                         <small>{project.ownerEmail}</small>
                       </span>
                       <em>
-                        {project.access === "owner"
-                          ? "소유"
-                          : project.access === "edit"
-                            ? "편집 가능"
-                            : "보기 전용"}
+                        {project.isReviewer && project.status === "review"
+                          ? "검토 요청"
+                          : project.access === "owner"
+                            ? "소유"
+                            : project.access === "edit"
+                              ? "편집 가능"
+                              : "보기 전용"}
                       </em>
                       <time>{formatDate(project.updatedAt)}</time>
                     </Link>
@@ -395,7 +399,7 @@ export default function Home() {
                 <div className="collaboration-list">
                   {comments.map((comment) => (
                     <Link
-                      href="/planning"
+                      href={`/planning?projectId=${encodeURIComponent(comment.projectId)}`}
                       key={`${comment.projectId}-${comment.id}`}
                     >
                       <Icon name="comment" />

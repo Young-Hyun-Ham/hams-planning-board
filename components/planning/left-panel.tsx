@@ -4,6 +4,7 @@ import { useUserStore } from "@/store";
 import { AiScreenGenerator } from "./ai-screen-generator";
 import { Icon } from "./icon";
 import type { Layer } from "./types";
+import type { ReviewDialogAction } from "./review-dialog";
 
 type SelectionMode = "single" | "toggle" | "range";
 
@@ -207,6 +208,10 @@ type Props = {
   onGenerate: () => void;
   generating: boolean;
   readOnly: boolean;
+  projectStatus: string;
+  isReviewer: boolean;
+  canManageReview: boolean;
+  onReviewAction: (action: ReviewDialogAction) => void;
 };
 
 export function LeftPanel({
@@ -240,6 +245,10 @@ export function LeftPanel({
   onGenerate,
   generating,
   readOnly,
+  projectStatus,
+  isReviewer,
+  canManageReview,
+  onReviewAction,
 }: Props) {
   const user = useUserStore((state) => state.user);
   const isLoadingUser = useUserStore((state) => state.isLoading);
@@ -542,7 +551,7 @@ export function LeftPanel({
         <span>홈</span>
         <button
           className="page-more-button"
-          disabled={readOnly}
+          disabled={readOnly && !isReviewer}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => setPageMenu(!pageMenu)}
         >
@@ -553,40 +562,90 @@ export function LeftPanel({
             className="page-menu"
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <button
-              onClick={() => {
-                onNewPage();
-                setPageMenu(false);
-              }}
-            >
-              <Icon name="plus" size={14} />새 페이지 추가
-            </button>
-            <span
-              className="page-menu-button-tooltip"
-              title={!user ? "로그인을 해주세요" : undefined}
-            >
+            {!isReviewer && (
               <button
                 onClick={() => {
-                  onSave();
+                  onNewPage();
                   setPageMenu(false);
                 }}
-                disabled={saving || readOnly || !user}
               >
-                <span>◇</span>
-                {saving ? "저장 중..." : "저장"}
+                <Icon name="plus" size={14} />새 페이지 추가
               </button>
-            </span>
+            )}
+            {!isReviewer && (
+              <span
+                className="page-menu-button-tooltip"
+                title={!user ? "로그인을 해주세요" : undefined}
+              >
+                <button
+                  onClick={() => {
+                    onSave();
+                    setPageMenu(false);
+                  }}
+                  disabled={
+                    saving || readOnly || !user || projectStatus === "review"
+                  }
+                >
+                  <span>◇</span>
+                  {saving ? "저장 중..." : "저장"}
+                </button>
+              </span>
+            )}
+            {isReviewer ? (
+              <>
+                <button
+                  className="context-delete"
+                  onClick={() => {
+                    onReviewAction("reject");
+                    setPageMenu(false);
+                  }}
+                >
+                  × 반려
+                </button>
+                <button
+                  onClick={() => {
+                    onReviewAction("complete");
+                    setPageMenu(false);
+                  }}
+                >
+                  ✓ 완료
+                </button>
+              </>
+            ) : canManageReview ? (
+              <>
+                <button
+                  disabled={!projectId || projectStatus === "review"}
+                  onClick={() => {
+                    onReviewAction("request");
+                    setPageMenu(false);
+                  }}
+                >
+                  ◎ {projectStatus === "review" ? "검토 중" : "검토"}
+                </button>
+                <button
+                  disabled={!projectId || projectStatus === "review"}
+                  onClick={() => {
+                    onReviewAction("complete");
+                    setPageMenu(false);
+                  }}
+                >
+                  ✓ 완료
+                </button>
+              </>
+            ) : null}
             <div className="context-separator" />
-            <button
-              className="context-delete"
-              disabled={!canDeletePage}
-              onClick={() => {
-                onDeletePage();
-                setPageMenu(false);
-              }}
-            >
-              × 삭제
-            </button>
+            {!isReviewer && (
+              <button
+                className="context-delete"
+                disabled={!canDeletePage}
+                onClick={() => {
+                  onDeletePage();
+                  setPageMenu(false);
+                }}
+              >
+                × 삭제
+              </button>
+            )}
           </div>
         )}
       </div>

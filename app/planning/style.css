@@ -1467,6 +1467,111 @@
   padding: 20px;
   background: #18181b66;
 }
+.review-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #18181b66;
+}
+.review-dialog {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 70px #0003;
+}
+.review-dialog > header,
+.review-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.review-dialog h2,
+.review-dialog p {
+  margin: 0;
+}
+.review-dialog h2 {
+  font-size: 19px;
+}
+.review-dialog header p {
+  margin-top: 5px;
+  color: #71717a;
+  font-size: 12px;
+}
+.review-dialog form,
+.review-dialog label {
+  display: grid;
+  gap: 8px;
+}
+.review-dialog form {
+  gap: 16px;
+  margin-top: 22px;
+}
+.review-dialog label span {
+  font-size: 12px;
+  font-weight: 700;
+}
+.review-dialog input,
+.review-dialog textarea,
+.review-dialog button {
+  border: 1px solid #dedee2;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+}
+.review-dialog input {
+  height: 42px;
+  padding: 0 12px;
+}
+.review-dialog textarea {
+  min-height: 130px;
+  padding: 12px;
+  resize: vertical;
+}
+.review-dialog button {
+  display: inline-flex;
+  visibility: visible;
+  align-items: center;
+  justify-content: center;
+  min-width: 70px;
+  height: 38px;
+  padding: 0 14px;
+  cursor: pointer;
+  opacity: 1;
+}
+.review-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.review-dialog footer {
+  position: sticky;
+  bottom: -24px;
+  margin: 0 -24px -24px;
+  padding: 16px 24px 24px;
+  border-top: 1px solid #ededee;
+  background: #fff;
+  justify-content: flex-end;
+}
+.review-dialog .review-dialog-submit {
+  border-color: var(--purple);
+  background: var(--purple);
+  color: #fff;
+  font-weight: 700;
+}
+.review-dialog .review-dialog-submit.reject {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+.review-dialog-error {
+  color: #c62828;
+  font-size: 12px;
+}
 .share-dialog {
   width: min(560px, 100%);
   max-height: min(680px, calc(100vh - 40px));
@@ -2089,6 +2194,10 @@
   background: #fff;
   color: #222;
   box-shadow: 0 1px 3px #0002;
+}
+.device-switch button:disabled:not(.active) {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 .zoom {
   justify-self: end;

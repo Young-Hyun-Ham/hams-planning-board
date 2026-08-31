@@ -18,6 +18,28 @@ function flatten(items: Layer[]): Layer[] {
   ]);
 }
 
+function findContainingPage(
+  pages: Layer[],
+  layerId: string,
+): Layer | undefined {
+  const contains = (layer: Layer): boolean =>
+    layer.id === layerId || Boolean(layer.children?.some(contains));
+  return pages.find(contains);
+}
+
+const deviceWidths: Record<Device, number> = {
+  desktop: 860,
+  tablet: 650,
+  mobile: 390,
+};
+
+const deviceForWidth = (width: number): Device =>
+  width <= deviceWidths.mobile
+    ? "mobile"
+    : width <= deviceWidths.tablet
+      ? "tablet"
+      : "desktop";
+
 type CanvasMemo = {
   id: string;
   text: string;
@@ -90,7 +112,6 @@ export function CanvasEditor({
   onSelect: (id: string) => void;
   readOnly: boolean;
 }) {
-  const [device, setDevice] = useState<Device>("desktop");
   const [tool, setTool] = useState<"cursor" | "hand">("cursor"),
     [panning, setPanning] = useState(false);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -232,8 +253,15 @@ export function CanvasEditor({
   const pages = layers.filter(
     (item) => item.kind === "page" && item.visible !== false,
   );
-  const defaultPageWidth =
-    device === "desktop" ? 860 : device === "tablet" ? 650 : 390;
+  const activePage =
+    findContainingPage(pages, selected) ??
+    pages.find((page) => page.id === focusPageId) ??
+    pages[0];
+  const activeDevice = deviceForWidth(
+    activePage ? (sizes[activePage.id]?.width ?? deviceWidths.desktop) : 860,
+  );
+  const activePageHasElements = Boolean(activePage?.children?.length);
+  const defaultPageWidth = deviceWidths.desktop;
   const pagePosition = (page: Layer, index: number): LayerPosition =>
     positions[page.id] ?? { x: index * (defaultPageWidth + 80), y: 0 };
   const workspaceWidth = Math.max(
@@ -447,7 +475,7 @@ export function CanvasEditor({
       resizeObserver.disconnect();
       node.removeEventListener("transitionend", measure);
     };
-  }, [selected, sizes, positions, device, layers, zoom]);
+  }, [selected, sizes, positions, layers, zoom]);
 
   useEffect(() => {
     if (focusRequestKey === 0) return;
@@ -1020,8 +1048,24 @@ export function CanvasEditor({
           {(["desktop", "tablet", "mobile"] as const).map((item) => (
             <button
               key={item}
-              className={device === item ? "active" : ""}
-              onClick={() => setDevice(item)}
+              className={activeDevice === item ? "active" : ""}
+              disabled={
+                readOnly ||
+                !activePage ||
+                (activePageHasElements && activeDevice !== item)
+              }
+              title={
+                activePageHasElements && activeDevice !== item
+                  ? "하위 요소가 있는 페이지는 크기를 변경할 수 없습니다."
+                  : `${item} 페이지 크기로 변경`
+              }
+              onClick={() => {
+                if (!activePage || activePageHasElements) return;
+                onResize(activePage.id, {
+                  width: deviceWidths[item],
+                  height: sizes[activePage.id]?.height ?? 560,
+                });
+              }}
             >
               {item[0].toUpperCase() + item.slice(1)}
             </button>
@@ -1093,7 +1137,7 @@ export function CanvasEditor({
                   width: sizes[page.id]?.width,
                   height: sizes[page.id]?.height,
                 }}
-                className={`artboard ${device} ${selected === page.id ? "canvas-node-selected page-selected" : ""}`}
+                className={`artboard ${deviceForWidth(sizes[page.id]?.width ?? deviceWidths.desktop)} ${selected === page.id ? "canvas-node-selected page-selected" : ""}`}
                 data-layer-id={page.id}
                 data-layer-label={selected === page.id ? page.name : undefined}
                 onContextMenu={openOrderMenu}

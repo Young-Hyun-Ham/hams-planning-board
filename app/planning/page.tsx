@@ -10,6 +10,10 @@ import {
 } from "@/components/planning/editor-data";
 import { LeftPanel } from "@/components/planning/left-panel";
 import { RightPanel } from "@/components/planning/right-panel";
+import {
+  ReviewDialog,
+  type ReviewDialogAction,
+} from "@/components/planning/review-dialog";
 import type {
   GeneratedDocument,
   GeneratedElement,
@@ -253,6 +257,13 @@ export default function Home() {
   const [projectId, setProjectId] = useState<string>();
   const [projectAccess, setProjectAccess] =
     useState<ProjectAccessLevel>("owner");
+  const [projectStatus, setProjectStatus] = useState("draft");
+  const [isReviewer, setIsReviewer] = useState(false);
+  const [reviewDialog, setReviewDialog] = useState<{
+    action: ReviewDialogAction;
+    loading: boolean;
+    error: string;
+  } | null>(null);
   const [documentTitle, setDocumentTitle] = useState("Page");
   const [saved, setSaved] = useState("저장됨");
   const [focusRequestKey, setFocusRequestKey] = useState(0);
@@ -844,9 +855,13 @@ export default function Home() {
     setSaved("새 페이지 추가됨");
   };
   const saveProject = async () => {
+    if (projectStatus === "review") {
+      setSaved("검토 중인 문서는 반려 또는 완료 전까지 저장할 수 없습니다.");
+      return false;
+    }
     if (projectAccess === "view") {
       setSaved("보기 전용 문서는 저장할 수 없습니다.");
-      return;
+      return false;
     }
     setSaving(true);
     setSaved("저장 중...");
@@ -879,8 +894,10 @@ export default function Home() {
       if (result.id) setProjectId(result.id);
       if (result.access) setProjectAccess(result.access);
       setSaved("Firebase에 저장됨");
+      return true;
     } catch (error) {
       setSaved(error instanceof Error ? error.message : "저장 실패");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -913,6 +930,9 @@ export default function Home() {
         layerImages?: unknown;
         layerStyles?: unknown;
         selected?: unknown;
+        status?: unknown;
+        review?: { message?: unknown } | null;
+        isReviewer?: unknown;
       };
       error?: string;
     };
@@ -972,8 +992,22 @@ export default function Home() {
     );
     setProjectId(project.id);
     setProjectAccess(result.access ?? "view");
+    const nextProjectStatus =
+      typeof project.status === "string" ? project.status : "draft";
+    const reviewMessage =
+      typeof project.review?.message === "string"
+        ? project.review.message.trim()
+        : "";
+    setProjectStatus(nextProjectStatus);
+    setIsReviewer(project.isReviewer === true);
     setSaved(
-      result.access === "view" ? "보기 전용으로 불러옴" : "Firebase에서 불러옴",
+      reviewMessage && nextProjectStatus === "rejected"
+        ? `반려 의견: ${reviewMessage}`
+        : reviewMessage && nextProjectStatus === "complete"
+          ? `완료 의견: ${reviewMessage}`
+          : result.access === "view"
+            ? "보기 전용으로 불러옴"
+            : "Firebase에서 불러옴",
     );
   };
 
@@ -1028,6 +1062,8 @@ export default function Home() {
         setFocusRequestKey((current) => current + 1);
         setProjectId(undefined);
         setProjectAccess("owner");
+        setProjectStatus("draft");
+        setIsReviewer(false);
         setSaved("템플릿에서 새 문서 생성됨");
       })
       .catch((error) => {
@@ -1040,6 +1076,65 @@ export default function Home() {
     // URL의 최초 템플릿만 새 문서로 불러오며 편집 중 재실행하지 않는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const submitReviewAction = async (values: {
+    reviewerEmail: string;
+    message: string;
+  }) => {
+    if (!reviewDialog) return;
+    const action = reviewDialog.action;
+    setReviewDialog((current) =>
+      current ? { ...current, loading: true, error: "" } : current,
+    );
+    try {
+      if (action === "save") {
+        const documentSaved = await saveProject();
+        if (!documentSaved) throw new Error("문서를 저장하지 못했습니다.");
+        setProjectStatus("draft");
+        setReviewDialog(null);
+        return;
+      }
+      if (!projectId) throw new Error("문서를 먼저 저장해주세요.");
+      if (!isReviewer) {
+        const documentSaved = await saveProject();
+        if (!documentSaved) {
+          throw new Error(
+            "문서를 먼저 저장하지 못해 승인 처리를 중단했습니다.",
+          );
+        }
+      }
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/review`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, ...values }),
+        },
+      );
+      const result = (await response.json()) as {
+        status?: string;
+        error?: string;
+      };
+      if (!response.ok || !result.status) {
+        throw new Error(result.error ?? "검토 상태를 변경하지 못했습니다.");
+      }
+      setProjectStatus(result.status);
+      setReviewDialog(null);
+      setSaved(
+        action === "request"
+          ? "검토 요청됨"
+          : action === "reject"
+            ? "설계서 반려됨"
+            : "설계서 완료됨",
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "검토 상태 변경 실패";
+      setReviewDialog((current) =>
+        current ? { ...current, loading: false, error: message } : current,
+      );
+    }
+  };
 
   const generate = async () => {
     if (projectAccess === "view") {
@@ -1218,7 +1313,9 @@ export default function Home() {
           onNewPage={() => {
             if (projectAccess !== "view") addPage();
           }}
-          onSave={saveProject}
+          onSave={() =>
+            setReviewDialog({ action: "save", loading: false, error: "" })
+          }
           onDeletePage={() => {
             if (projectAccess !== "view") deleteSelectedPage();
           }}
@@ -1243,6 +1340,12 @@ export default function Home() {
           onGenerate={generate}
           generating={generating}
           readOnly={projectAccess === "view"}
+          projectStatus={projectStatus}
+          isReviewer={isReviewer && projectStatus === "review"}
+          canManageReview={projectAccess === "owner"}
+          onReviewAction={(action) =>
+            setReviewDialog({ action, loading: false, error: "" })
+          }
         />
         <CanvasEditor
           projectId={projectId}
@@ -1332,6 +1435,16 @@ export default function Home() {
           readOnly={projectAccess === "view"}
         />
       </section>
+      {reviewDialog && (
+        <ReviewDialog
+          open
+          action={reviewDialog.action}
+          loading={reviewDialog.loading}
+          error={reviewDialog.error}
+          onClose={() => setReviewDialog(null)}
+          onSubmit={submitReviewAction}
+        />
+      )}
       {errorSnackbar && (
         <div
           key={errorSnackbar.id}
